@@ -1177,6 +1177,10 @@ clear, every check right. Module 37,614 bytes. The calls a game frame now makes 
 `SS.LiveKeys` and `SS.Joy` 4 each (one a pass), `SS.BmLine` 2.4, `SS.BmClear` 1, `SS.Layer` (the
 flip) 1, `SS.ClutWrite` 0.5.
 
+**On both disk images together with the small-shapes build** (user's call, one hardware run for
+both; targeted copy, copied back and compared). The Wildbits MAME: title, coin, start, the rating
+screen, `q` and the sign-off.
+
 Also: the program's `SS.DScrn` is now spelled **`SS.MCR`** (`wildbits.d`'s name for the same code;
 `SS.Layer` was already used for `$8E`), and `osrun.py` uses both new names. Module byte-identical.
 
