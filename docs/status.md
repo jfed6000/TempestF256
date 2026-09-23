@@ -67,7 +67,18 @@ and 0 (3.5), 31 distinct characters. So a host-rendered font needs **two sizes o
 drawn as masks in any colour. The VICKY text font and tile sets are fixed at 8×8 and cannot match
 either size; that is not a limit on masks, which are our own pixels.
 
-**Not yet done in stage 0:** `tools/glyphs.py` (the D3 font), a played game (only attract so far, whose demo is play-like), the 6502
+**The D3 font (`tools/glyphs.py`, 2026-09-22).** The 41-entry `VGMSGA` table of character `JSRL`s is
+at `$31E4` in the Rev 3 ROM too (checked by decoding it): blank, 0-9 (0 shares O's routine), A-Z, a
+second blank, DASH, HALF, COPYR. Each is run through `avgview`'s AVG at both scales: normal glyphs are
+up to 5×6 pixels, big up to 8×11. Every character drawn in the attract capture is in the set (27,286
+draws). Characters use **their own stroke intensities** (12; 10 in a few), not the STAT intensity, and
+HALF resets the scale on exit and moves the beam off the baseline; both recorded per glyph.
+**Glyphs versus line-drawn text:** 27% of pixels differ, but a line-drawn character takes ~2 shapes
+(up to 5) depending on where it falls on the pixel grid, and even the best single shape per character
+differs by 21.5%. Side by side on the high-score and demo screens the glyph text is the more legible
+(line-drawn "COIN" smears into "CCCIN"). One shape per character, rendered at pixel phase 0.
+
+**Not yet done in stage 0:** a played game (only attract so far, whose demo is play-like), the 6502
 busy fraction, POKEY write logging, `tools/m65parse.py`.
 
 ## Open items
