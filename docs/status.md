@@ -108,7 +108,34 @@ chips, POKEY 1 channel 3 (`$04`/`$05`) far the busiest, and `AUDCTL`/`SKCTL` onl
 (12 and 24 writes). So the register image of plan D5 is 8 × (`AUDF`, `AUDC`) and nothing else changes
 in play.
 
-**Not yet done in stage 0:** `tools/m65parse.py`.
+**`tools/m65parse.py` (2026-09-22): the MAC65 reader.** Classifies every line of the 11 game files
+(labels, assignments, instructions with their addressing mode, HLL65 structures, directives, macro
+calls, macro bodies) with **no unrecognised statements** and **HLL65 nesting balanced in every
+file**. It evaluates `.IF`/`.IFF`/`.ENDC` MACRO-11-style (left to right, no precedence) and treats
+`.REPT 0` blocks — Atari's block comments — as dead: ALDIS2's 154 dead lines are the `.IF NE,0`
+multiply/window code, ALVROM's 168 the space-game remnants. It follows macro-defining macros:
+HLL65's `DEFIF`/`DEFEND`, and **ALWELG's enemy behaviour, which is a small bytecode** — `CAMAC`,
+`CAMA2I`, `CAMA2F` (`ALWELG.MAC:1579`) each make a jump-table entry (`TABJSR`) and a macro emitting
+the opcode byte (`VSMOVE`, `VEXIT`, `VSETPC`, ...), so the cam tables translate as data plus one
+dispatcher.
+
+**Addressing modes, 5,548 live instructions** — the input to D6's register model:
+
+| Mode | Count | Share |
+|---|---:|---:|
+| absolute / zero page | 2,377 | 42.8% |
+| immediate | 1,248 | 22.5% |
+| implied / accumulator | 1,008 | 18.2% |
+| `abs,X` / `zp,X` | 483 (+22 forced) | 8.7% |
+| `abs,Y` | 229 (+6 forced) | 4.1% |
+| `(zp),Y` | 112 | 2.0% |
+| relative (explicit branches; HLL65 adds more) | 57 | 1.0% |
+
+Top mnemonics: LDA 1,395, STA 992, JSR 392, LDX 267, LDY 242, CMP 199, RTS 193, AND 187, ADC 155.
+Note for the translator: HLL65's `ELSE` is `CLV` plus an always-taken `BVC`, so the V flag does not
+survive an `ELSE`.
+
+**Stage 0 is complete.** Next: the D6 pilot.
 
 ## Open items
 
