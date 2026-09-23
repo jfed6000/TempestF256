@@ -78,8 +78,37 @@ HALF resets the scale on exit and moves the beam off the baseline; both recorded
 differs by 21.5%. Side by side on the high-score and demo screens the glyph text is the more legible
 (line-drawn "COIN" smears into "CCCIN"). One shape per character, rendered at pixel phase 0.
 
-**Not yet done in stage 0:** a played game (only attract so far, whose demo is play-like), the 6502
-busy fraction, POKEY write logging, `tools/m65parse.py`.
+**A played game (2026-09-22).** `avgcap.lua` gained three optional modes: `AVGCAP_PLAY=1` plays
+(coin and start through MAME's input fields, fire tapped, superzapper every 1,500 frames, the knob by
+writing `TBHD` = `$50`, found from `MOVCUR`'s clamp at `$975B` in the Rev 3 ROM; seeded, so a run
+repeats), `AVGCAP_TIMING` logs `MAINLN`'s work per game frame (`FRTIMR` = `$53`, wait loop at `$C7A7`),
+and `AVGCAP_POKEY` logs every POKEY write. 300 s of play, snapshots confirming real games on the circle
+and cross wells:
+
+| Played frames (18,001; sampled every 10th past frame 500 for the split) | median | 95% | max |
+|---|---:|---:|---:|
+| Line records, all | 288 | 323 | 413 |
+| **Line records, characters excluded (what the port sends, D3)** | **148** | **265** | **305** |
+| Characters (glyphs) | 17 | 94 | 94 |
+| Pixels | 1,972 | 2,702 | 3,583 |
+
+Play is lighter than attract's text screens. With glyphs, **one or two `SS.BmLine` calls a frame**:
+at the estimated 25-30 µs a record, ~4.4 ms median and ~9 ms worst of a 36.6 ms game frame.
+
+**The 6502's work per game frame** (8,128 game frames = **27.1 Hz**, as predicted): median **21.4 ms**
+(58% of the 36.6 ms frame, ~32,000 cycles at 1.512 MHz), 90% 31.6 ms, 99% 41.3 ms, max 44.9 ms.
+**The arcade overruns too**: 6% of frames took 10-12 IRQs instead of 9. So the budget for the
+translated game logic plus the display-list build is ~32K 6502 cycles typical and ~68K worst, which
+must fit beside the interpreter and the driver calls in 36.6 ms at 8 MHz. Arithmetic, once the D6
+pilot gives the expansion ratio.
+
+**POKEY writes:** 825 a second. `POTGO`/`POTGO2` (`$0B`, `$1B`) are 246 a second each — the IRQ kicking
+the pot scan for the spinner and switches, not sound. The sound writes are `AUDF`/`AUDC` on both
+chips, POKEY 1 channel 3 (`$04`/`$05`) far the busiest, and `AUDCTL`/`SKCTL` only at start-up
+(12 and 24 writes). So the register image of plan D5 is 8 × (`AUDF`, `AUDC`) and nothing else changes
+in play.
+
+**Not yet done in stage 0:** `tools/m65parse.py`.
 
 ## Open items
 
