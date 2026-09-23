@@ -37,6 +37,12 @@ TXCNT               rmb       2                   TXOLD's entries
 ROWMSK              rmb       30                  text.a: the rows an erase touched, a bit a row
 TXCLR               rmb       1                   text.a: the colour being drawn (0 = erasing)
 TXERS               rmb       1                   text.a: non-zero once this frame erased (ROWMSK valid)
+TXFO                rmb       32                  text.a TxMatch: the old entries that changed, a bit each
+TXFN                rmb       32                  the new ones (must follow TXFO)
+TXI                 rmb       2                   TxMatch: the old list's place
+TXJ                 rmb       2                   the new list's
+TXK                 rmb       1                   a look-ahead's distance
+TXANY               rmb       1                   non-zero: something changed
 TXROW               rmb       2                   text.a: scratch
 TXCOL               rmb       2
 TXGLY               rmb       2

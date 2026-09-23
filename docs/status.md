@@ -1043,6 +1043,17 @@ What was expected: about **60 passes and 13-14 game frames a second**: the hardw
   entries. Horizontal runs double in pixels, so a frame's pixels rise by perhaps half, each one an
   RMW: `tline S` (or the sign-off's numbers) on a HIRES4 plane decides whether it is affordable.
 
+### The high score screen's redraw (2026-09-23; fixed, untested on hardware)
+
+The K2 (on branch `hires640`) showed **the high score screen clearing and redrawing**. Its text
+list's first entries are a line that alternates every ~2 s between an 11- and an 8-character
+message; `TxCommit` compared the lists index for index, so every later entry differed and all 148
+were erased and redrawn (293 glyphs, ~38 ticks, 0.6 s). `TxMatch` (`text.a`) now matches the lists
+in order with an 8-entry look-ahead each way and flags the changed entries a bit each (`TXFO`,
+`TXFN`): **20 glyphs and ~5.5 ticks a change in the model, every text bitmap checked right**. The
+match costs ~1.1 ms for 148 entries (`TXMUS`); an unchanged list is no longer copied. The 640
+branch's own results are on that branch's copy of this file.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
