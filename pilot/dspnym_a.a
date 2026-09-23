@@ -1,0 +1,212 @@
+* dspnym_a.a - DSPNYM (ALDIS2.MAC:457) and the list utilities it calls, register model A: 6502 X
+* in B, Y in <RY.
+*
+* A display-list builder that stores straight into the list with STA NY,VGLIST.  VGLIST holds a
+* logical address, big-endian (<VGLIST high, <VGLIST+1 low: every 6502 byte access to it is
+* swapped), so "ldx <VGLIST" is the pointer.  Block-local rules: 6809 X caches VGLIST + Y, and
+* later stores in the block fold the Y increments into the offset; 6809 Y caches the data base +
+* X ("stb <RX / ldy <RXP") until X changes.  B holds X wherever X is used as a value (TXA, a
+* callee that reads it); where X is needed only as an index, the Y cache stands for it and B is
+* free.  Building the list pointer needs B, so B is saved around it when it holds X.  Flag
+* liveness picks CLR/CLRA/COMA where the 6502's LDY I,0 / LDA I,0 / EOR I,0FF leave a carry
+* nobody reads.
+
+	include	pilot.d
+	include	arcade.d
+
+DSPNYM	ldb	#NYMCOL			LDY I,NYMCOL
+	stb	<RY
+	stb	<COLOR			STY COLOR
+	lda	#MZCOLO			LDA I,MZCOLO
+	lbsr	VGSTAT			JSR VGSTAT
+	ldb	#XADJL			LDX I,XADJL
+	lbsr	VGYAB1			JSR VGYAB1: beam to the vanishing point
+	lda	#18			LDA I,18.
+	sta	<PXL			STA PXL: the most to display
+	ldb	#NNYMPH-1		LDX I,NNYMPH-1
+	stb	<INDEX1			STX INDEX1
+	clr	<RY			LDY I,0
+dn1@	ldb	<INDEX1			BEGIN / LDX INDEX1
+	stb	<RX
+	ldy	<RXP			LDA X,NYMPY
+	lda	NYMPY,y
+	lbeq	NONYM			IFEQ / JMP NONYM / ENDIF: nymph active?
+	cmpa	#$50			CMP I,50
+	blo	dn2@			IFCS: skip every other one past this depth
+	dec	<INDEX1			DEC INDEX1
+dn2@	pshs	a			ENDIF / PHA
+	anda	#$3F			AND I,3F
+	ldx	<VGLIST			STA NY,VGLIST: linear scale
+	ldb	<RY
+	abx
+	sta	,x
+	puls	a			PLA
+	rola				ROL / ROL / ROL (the carry shifted in is masked off)
+	rola
+	rola
+	anda	#3			AND I,3
+	adda	#1			CLC / ADC I,1
+	ora	#$70			ORA I,70
+	inc	<RY			INY
+	sta	1,x			STA NY,VGLIST: binary scale
+	inc	<RY			INY
+	lda	NYMPL,y			LDA X,NYMPL
+	sta	<RX			TAX
+	ldy	<RXP			LDA X,LIFSZL
+	lda	LIFSZL,y
+	suba	<ZADJL			SEC / SBC ZADJL
+	sta	<SZL			STA SZL
+	sta	2,x			STA NY,VGLIST: Z LSB
+	inc	<RY			INY
+	lda	LIFSZH,y		LDA X,LIFSZH
+	sbca	<ZADJL+1		SBC ZADJL+1
+	sta	<SZH			STA SZH
+	anda	#$1F			AND I,1F
+	sta	3,x			STA NY,VGLIST: Z MSB
+	inc	<RY			INY
+	lda	LIFSXL,y		LDA X,LIFSXL
+	sta	<SXL			STA SXL
+	sta	4,x			STA NY,VGLIST: X LSB
+	inc	<RY			INY
+	lda	LIFSXH,y		LDA X,LIFSXH
+	sta	<SXH			STA SXH
+	anda	#$1F			AND I,1F
+	sta	5,x			STA NY,VGLIST: X MSB
+	inc	<RY			INY: display a dot
+	clra				LDA I,0
+	sta	6,x			STA NY,VGLIST: 0 Z LSB
+	inc	<RY			INY
+	sta	7,x			STA NY,VGLIST: 0 Z MSB
+	inc	<RY			INY
+	sta	8,x			STA NY,VGLIST: 0 X LSB
+	lda	#$A0			LDA I,0A0
+	inc	<RY			INY
+	sta	9,x			STA NY,VGLIST: brightness, 0 X MSB
+	inc	<RY			INY
+	lda	<SZL			LDA SZL: vector back to the fake vanishing point
+	coma				EOR I,0FF
+	adda	#1			CLC / ADC I,1
+	sta	10,x			STA NY,VGLIST: Z LSB
+	inc	<RY			INY
+	lda	<SZH			LDA SZH
+	eora	#$FF			EOR I,0FF (the carry is live)
+	adca	#0			ADC I,0
+	anda	#$1F			AND I,1F
+	sta	11,x			STA NY,VGLIST: Z MSB
+	inc	<RY			INY
+	lda	<SXL			LDA SXL
+	coma				EOR I,0FF
+	adda	#1			CLC / ADC I,1
+	sta	12,x			STA NY,VGLIST: X LSB
+	inc	<RY			INY
+	lda	<SXH			LDA SXH
+	eora	#$FF			EOR I,0FF
+	adca	#0			ADC I,0
+	anda	#$1F			AND I,1F
+	sta	13,x			STA NY,VGLIST: X MSB
+	inc	<RY			INY
+	ldb	<RY			CPY I,0F0
+	cmpb	#$F0
+	blo	dn3@			IFCS: list index maxing out?
+	dec	<RY			DEY
+	lbsr	VGADD			JSR VGADD: update VGLIST
+	clr	<RY			LDY I,0
+dn3@	dec	<PXL			ENDIF / DEC PXL: exit early at the limit
+	bmi	EXCESS			BMI EXCESS
+NONYM	dec	<INDEX1			DEC INDEX1
+	lbpl	dn1@			MIEND
+EXCESS	lda	<RY			TYA
+	beq	ZQATLI			IFNE
+	dec	<RY			DEY
+	lbsr	VGADD			JSR VGADD
+ZQATLI	lda	<QT1			ENDIF / LDA QT1
+	beq	dn5@			IFNE
+	lda	<WAVEN1			LDA WAVEN1
+	cmpa	#10			CMP I,10.
+	blo	dn5@			IFCS
+	lda	#$7A			LDA I,7A
+	sta	<FRTIMR			STA FRTIMR
+dn5@	lda	#1			ENDIF / ENDIF / LDA I,1
+	bra	VGSCA1			JMP VGSCA1
+
+* ALVGUT.MAC:224 VGSTAT - A = limit/enable flags, Y = brightness.
+VGSTAT	ora	#$60			ORA I,60
+	tfr	a,b			TAX
+	lda	<RY			TYA
+	bra	VGADD2			JMP VGADD2
+
+* ALVGUT.MAC:250 VGADD2 / VGADD3 - add the bytes A, X to the list.
+VGADD2	clr	<RY			LDY I,0
+VGADD3	pshs	b			STA NY,VGLIST (B is X, read below)
+	ldx	<VGLIST
+	ldb	<RY
+	abx
+	puls	b
+	sta	,x
+	inc	<RY			INY
+	tfr	b,a			TXA
+	sta	1,x			STA NY,VGLIST
+*					falls into VGADD
+
+* ALVGUT.MAC:268 VGADD - VGLIST += Y + 1.
+VGADD	lda	<RY			TYA
+	orcc	#1			SEC
+	adca	<VGLIST+1		ADC VGLIST
+	sta	<VGLIST+1		STA VGLIST
+	bcc	vga1@			BCC 10$
+	inc	<VGLIST			INC VGLIST+1
+vga1@	rts
+
+* ALVGUT.MAC:285 VGSCA1 / VGSCAL - A = binary scale, Y = linear scale.
+VGSCA1	clr	<RY			LDY I,0
+VGSCAL	ora	#$70			ORA I,70
+	tfr	a,b			TAX
+	lda	<RY			TYA
+	bra	VGADD2			JMP VGADD2
+
+* ALDIS2.MAC:3240 VGYAB1 / VGYABS - beam to the absolute position in the zero-page pair at X.
+VGYAB1	clr	<RY			LDY I,0
+	lda	<RY			TYA
+	pshs	b			STA NY,VGLIST (B is X, the pair's address)
+	ldx	<VGLIST
+	ldb	<RY
+	abx
+	puls	b
+	sta	,x
+	lda	#$71			LDA I,71
+	inc	<RY			INY
+	sta	1,x			STA NY,VGLIST: scale binary 1, linear 0
+	inc	<RY			INY
+	bne	NOLABS			BNE NOLABS (always)
+VGYABS	clr	<RY			LDY I,0
+NOLABS	lda	#$40			LDA I,40
+	pshs	b			STA NY,VGLIST: VG center
+	ldx	<VGLIST
+	ldb	<RY
+	abx
+	puls	b
+	sta	,x
+	lda	#$80			LDA I,80
+	inc	<RY			INY
+	sta	1,x			STA NY,VGLIST
+	inc	<RY			INY
+	stb	<RX			LDA ZX,2
+	ldy	<RXP
+	lda	2,y
+	sta	<CURNTY			STA CURNTY
+	sta	2,x			STA NY,VGLIST: VCTR delta Z
+	inc	<RY			INY
+	lda	3,y			LDA ZX,3
+	sta	<CURNTY+1		STA CURNTY+1
+	anda	#$1F			AND I,1F
+	sta	3,x			STA NY,VGLIST
+	lda	,y			LDA ZX,0
+	sta	<CURNTX			STA CURNTX
+	inc	<RY			INY
+	sta	4,x			STA NY,VGLIST: delta X
+	lda	1,y			LDA ZX,1
+	sta	<CURNTX+1		STA CURNTX+1
+	anda	#$1F			AND I,1F
+	inc	<RY			INY
+	sta	5,x			STA NY,VGLIST
+	bra	VGADD			JMP VGADD

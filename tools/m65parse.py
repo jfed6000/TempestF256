@@ -18,6 +18,8 @@ line numbers kept as an editor shows them) and classifies every line:
 strictly left-to-right, no precedence), so code assembled out (ALDIS2's .IF NE,0 block, the
 SPACG=0 space-game remnants) is marked dead rather than counted.  .INCLUDE'd files contribute
 symbols and macros; their lines are not reported as the file's own.  HLL65 nesting is checked.
+In an .ASECT below $800 the location counter is followed through .=, .BLKB and .BLKW, so RAM labels
+(zero page, page 1, the object arrays) get their addresses; code labels stay unknown.
 
 Usage:
   m65parse.py FILE.MAC ... [--stats] [--modes] [--json OUT]
@@ -40,14 +42,14 @@ HLL = HLL_IF | HLL_END | {"ELSE", "THEN", "ENDIF", "BEGIN"}
 # Operand prefixes, longest first so NY, is not read as N...
 MODES = [("NY,", "(zp),Y"), ("NX,", "(zp,X)"), ("AX,", "abs,X!"), ("AY,", "abs,Y!"),
          ("ZX,", "zp,X!"), ("ZY,", "zp,Y!"), ("I,", "imm"), ("X,", ",X"), ("Y,", ",Y"),
-         ("Z,", "zp!"), ("A,", "abs!")]
+         ("Z,", "zp!"), ("A,", "abs!"), ("#", "imm")]
 
 SRC = os.path.join(os.path.dirname(__file__), "..", "tempest_orig", "src")
 
 
 class Line:
     __slots__ = ("file", "no", "text", "labels", "kind", "op", "operand", "mode", "comment",
-                 "dead", "depth", "sym", "value")
+                 "dead", "depth", "sym", "value", "radix")
 
     def __init__(self, file, no, text):
         self.file, self.no, self.text = file, no, text
@@ -55,6 +57,7 @@ class Line:
         self.kind = "blank"
         self.op = self.operand = self.mode = self.comment = self.sym = None
         self.value = None
+        self.radix = 16
         self.dead = False
         self.depth = 0
 
@@ -66,6 +69,11 @@ def read_lines(path):
     with open(path, "rb") as f:
         raw = f.read().decode("latin-1")
     return [l.replace("\r", " ") for l in raw.split("\n")]
+
+
+def sym6(name):
+    """MACRO-11 symbols are significant to six characters: INDYLOC is INDYLO."""
+    return name.upper()[:6]
 
 
 def split_comment(s):
@@ -129,7 +137,7 @@ class Evaluator:
             if tok.endswith("."):
                 return int(tok[:-1], 10), i + 1
             return int(tok, self.radix), i + 1
-        key = tok.upper()
+        key = sym6(tok)
         if key in self.syms:
             return self.syms[key], i + 1
         if self.radix == 16 and re.fullmatch(r"[0-9A-Fa-f]+", tok) and tok[0].isdigit():
@@ -168,6 +176,11 @@ class Parser:
         # Macros that define macros (HLL65's DEFIF/DEFEND, ALWELG's CAMAC/CAMA2I/CAMA2F): the
         # outer macro's name -> which of its arguments becomes a new macro name when it is called.
         self.generators = {"DEFIF": 0, "DEFEND": 0}
+        # .ASECT location counter, so RAM labels (zero page, page 1, the object arrays at $200-$7FF)
+        # get their addresses.  None elsewhere: code labels stay unknown.
+        self.loc = None
+        self.ram_labels = set()     # symbols defined as labels in RAM (addresses, not constants)
+        self.globals = set()        # .GLOBL names and NAME:: labels
 
     def parse(self, path, own=True):
         name = os.path.basename(path).upper()
@@ -179,6 +192,7 @@ class Parser:
         problems = []
         for no, text in enumerate(read_lines(path), 1):
             ln = Line(name, no, text)
+            ln.radix = self.ev.radix
             body, ln.comment = split_comment(text)
             s = body.strip()
             live = all(c is not False for c in cond)
@@ -235,7 +249,7 @@ class Parser:
                 val = self.ev.value(parts[1]) if len(parts) > 1 else None
                 t = cond_true(parts[0].strip(), val) if parts[0].strip().upper() not in ("DF", "NDF", "B", "NB", "IDN", "DIF") else None
                 if parts[0].strip().upper() in ("DF", "NDF") and len(parts) > 1:
-                    d = parts[1].strip().upper() in self.syms
+                    d = sym6(parts[1].strip()) in self.syms
                     t = d if parts[0].strip().upper() == "DF" else not d
                 cond.append(t if live else False)
                 ln.kind, ln.op, ln.operand = "directive", head, rest
@@ -265,6 +279,11 @@ class Parser:
                     break
                 lab = m.group(1).upper()
                 ln.labels.append(lab + (" (global)" if m.group(2) == "::" else ""))
+                if live and self.loc is not None and not rept_depth:
+                    self.syms[sym6(lab)] = self.loc
+                    self.ram_labels.add(sym6(lab))
+                if live and own and m.group(2) == "::":
+                    self.globals.add(sym6(lab))
                 s = m.group(3)
                 if not s:
                     break
@@ -277,13 +296,25 @@ class Parser:
             m = re.match(r"([A-Za-z_.$][A-Za-z0-9_.$]*)\s*(==|=:|=)\s*(.*)$", s)
             if m and not s.upper().startswith(".IIF"):
                 ln.kind, ln.sym, ln.operand = "assign", m.group(1).upper(), m.group(3).strip()
-                if live and ln.sym != ".":
+                if live and ln.sym == "." and self.loc is not None:
+                    self.syms["."] = self.loc
                     v = self.ev.value(ln.operand)
+                    ln.value = self.loc = v
+                    self.syms.pop(".", None)
+                    if v is None or v >= 0x800:
+                        # An absolute code section (ALWELG at $9000, ALVROM): only RAM is
+                        # tracked, since instruction sizes are not counted here.
+                        self.loc = None
+                elif live and ln.sym != ".":
+                    if self.loc is not None:
+                        self.syms["."] = self.loc       # CBUF1 =. : the RAM location counter
+                    v = self.ev.value(ln.operand)
+                    self.syms.pop(".", None)
                     ln.value = v
                     if v is not None:
-                        self.syms[ln.sym] = v
-                    elif ln.sym in self.syms and not rept_depth:
-                        del self.syms[ln.sym]
+                        self.syms[sym6(ln.sym)] = v
+                    elif sym6(ln.sym) in self.syms and not rept_depth:
+                        del self.syms[sym6(ln.sym)]
                 out.append(ln)
                 continue
 
@@ -292,6 +323,12 @@ class Parser:
             rest = words[1].strip() if len(words) > 1 else ""
             ln.op, ln.operand = head, rest or None
 
+            if head in (".ASECT", ".CSECT", ".PSECT") and live:
+                self.loc = 0 if head == ".ASECT" else None
+                self.syms.pop(".", None)
+            elif head in (".BLKB", ".BLKW") and live and self.loc is not None and not rept_depth:
+                n = self.ev.value(rest)
+                self.loc = None if n is None else self.loc + n * (2 if head == ".BLKW" else 1)
             if head == ".RADIX" and live:
                 v = Evaluator({}).value(rest) if rest else None
                 if rest.strip().endswith("."):
@@ -299,6 +336,12 @@ class Parser:
                 elif v:
                     self.ev.radix = int(rest.strip(), 10) if rest.strip().isdigit() else v
                 ln.kind = "directive"
+            elif head == ".GLOBL":
+                ln.kind = "directive"
+                if live and own:
+                    for g in rest.split(","):
+                        if g.strip():
+                            self.globals.add(sym6(g.strip()))
             elif head == ".INCLUDE":
                 ln.kind = "directive"
                 inc = rest.split()[0].upper() if rest else ""

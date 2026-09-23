@@ -1,0 +1,142 @@
+* worscr.a - WORSCR (ALDIS2.MAC:2208), both register models (MODELA: 6502 X in B; else model B,
+* 6502 X in <RX).  WORSCR only ever loads X, so the models differ by one store at the end.
+*
+* World to screen: SZ = ZADJ +/- |PZ-EZ|*128/DY and SX = XADJ +/- |PX-EX|*128/DY, saturated,
+* where DY = PY - EY (at least 1 if the point is behind the eye).  The Math Box writes become a
+* coprocessor divide; everything else is the mechanical translation.  Exit as the 6502's: A = SXH,
+* 6502 X = MTEMP+3, MTEMP+1..3 as the 6502 leaves them.  SOFTDIV builds a software divide.
+
+	include	pilot.d
+	include	arcade.d
+
+WORSCR
+	ldb	<PYL			LDA PYL / SEC / SBC EYL / STA MXPL
+	subb	<EYL
+	lda	#0			LDA I,0 / SBC EYH / STA MXPH  (LDA keeps C)
+	sbca	<EYH
+	bpl	ws1@			IFMI: point behind the eye?
+	ldd	#1			yes: put it at the eye
+ws1@	tfr	d,y			Y = DY, the divisor of both divides
+	lda	<PZL			LDA PZL / CMP EZL
+	cmpa	<EZL
+	blo	ws2@			IFCS
+	suba	<EZL			SBC EZL (C known set)
+	ldb	#0			LDX I,0
+	bra	ws3@
+ws2@	lda	<EZL			ELSE: LDA EZL / SEC / SBC PZL
+	suba	<PZL
+	ldb	#-1			LDX I,-1
+ws3@	stb	<MTEMP+2		STX MTEMP+2
+	pshs	a			|DZ|, the divide's first dividend (STA MZLH / STA MSZXD)
+	lda	<PXL			LDA PXL / CMP EXL
+	cmpa	<EXL
+	blo	ws4@			IFCS
+	suba	<EXL			SBC EXL
+	ldb	#0			LDX I,0
+	bra	ws5@
+ws4@	lda	<EXL			ELSE: LDA EXL / SEC / SBC PXL
+	suba	<PXL
+	ldb	#-1			LDX I,-1
+ws5@	sta	<MTEMP+1		STA MTEMP+1
+	stb	<MTEMP+3		STX MTEMP+3
+	puls	a
+	bsr	DIVQ			BEGIN / BIT MSTAT / PLEND: D = |DZ|*128/DY
+	stb	<SZL			LDA MYLOW / STA SZL
+	sta	<SZH			LDA MYHIGH / STA SZH
+	lda	<MTEMP+2		LDA MTEMP+2
+	bmi	ws6@			IFPL
+	lda	<SZL			LDA SZL / CLC / ADC ZADJL / STA SZL
+	adda	<ZADJL
+	sta	<SZL
+	lda	<SZL+1			LDA SZL+1 / ADC ZADJL+1
+	adca	<ZADJL+1
+	bvc	ws7@			IFVS
+	lda	#$FF			LDA I,0FF / STA SZL / LDA I,7F
+	sta	<SZL
+	lda	#$7F
+	bra	ws7@			ENDIF (STA SZL+1 below)
+ws6@	lda	<ZADJL			ELSE: LDA ZADJL / SEC / SBC SZL / STA SZL
+	suba	<SZL
+	sta	<SZL
+	lda	<ZADJL+1		LDA ZADJL+1 / SBC SZL+1
+	sbca	<SZL+1
+	bvc	ws7@			IFVS
+	clr	<SZL			LDA I,0 / STA SZL / LDA I,80
+	lda	#$80
+ws7@	sta	<SZL+1			STA SZL+1
+	lda	<MTEMP+1		LDA MTEMP+1 / STA MZLH / STA MSZXD
+	bsr	DIVQ			BEGIN / BIT MSTAT / PLEND
+	stb	<SXL			LDA MYLOW / STA SXL
+	sta	<SXH			LDA MYHIGH / STA SXH
+	ldb	<MTEMP+3		LDX MTEMP+3
+	ifndef	MODELA
+	stb	<RX
+	endc
+	bmi	ws8@			IFPL
+	lda	<SXL			LDA SXL / CLC / ADC XADJL / STA SXL
+	adda	<XADJL
+	sta	<SXL
+	lda	<SXL+1			LDA SXL+1 / ADC XADJL+1
+	adca	<XADJL+1
+	bvc	ws9@			IFVS
+	lda	#$FF
+	sta	<SXL
+	lda	#$7F
+ws9@	sta	<SXL+1			STA SXL+1
+	rts
+ws8@	lda	<XADJL			LDA XADJL / SEC / SBC SXL / STA SXL
+	suba	<SXL
+	sta	<SXL
+	lda	<XADJL+1		LDA XADJL+1 / SBC SXL+1
+	sbca	<SXL+1
+	bvc	ws10@			IFVS
+	clr	<SXL
+	lda	#$80
+ws10@	sta	<SXL+1			STA SXL+1
+	rts
+
+* DIVQ - the Math Box's SZXD as WORSCR sets it up (N=15, dividend A*256, divisor Y):
+* D = floor(A*128/Y) for Y = 1..$7FFF, and $FFFF for Y = 0 (checked against MAME's model over
+* every input; docs/status.md).  Uses A, B, CC.
+DIVQ	leay	,y			DY = 0: the Math Box answers $FFFF
+	beq	dq0@
+	ifdef	SOFTDIV
+	clrb				D = A*128
+	lsra
+	rorb
+	lbra	SDIV
+	else
+	clrb				D = A*128
+	lsra
+	rorb
+	pshs	cc			the unit is shared (fm uses it): mask for the sequence
+	orcc	#$50
+	sty	CP.DVSR
+	std	CP.DVND
+	ldd	CP.QUOT
+	puls	cc,pc
+	endc
+dq0@	ldd	#$FFFF
+	rts
+
+	ifdef	SOFTDIV
+* SDIV - D = D / Y, unsigned 16/16, restoring shift-and-subtract.  Uses X.
+SDIV	pshs	y,d			0,s dividend -> quotient, 2,s divisor
+	ldx	#0			remainder
+	lda	#16
+	pshs	a			0,s count; dividend at 1,s, divisor at 3,s
+sd1@	asl	2,s			shift dividend/quotient left, top bit into the remainder
+	rol	1,s
+	exg	x,d
+	rolb
+	rola
+	cmpd	3,s
+	blo	sd2@
+	subd	3,s
+	inc	2,s			quotient bit
+sd2@	exg	x,d
+	dec	,s
+	bne	sd1@
+	leas	1,s
+	puls	d,y,pc
+	endc

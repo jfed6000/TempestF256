@@ -1,7 +1,11 @@
 # Tempest for NitrOS-9 Level 2 on Wildbits F256: status
 
-**2026-09-22.** Survey (`docs/port-tempest.md`) and plan (`docs/port-plan.md`) written. Stage 0 has
-begun: the capture and the host AVG interpreter work and match MAME. No 6809 code exists.
+**2026-09-23.** Stage 0 complete; the D6 pilot done and approved (model B and its conventions).
+**D6 step 1 is done and reviewed** (section "D6 step 1: the translator" below; decisions there):
+`tools/m65to09.py` translates the whole game into a first draft (`xlat/`, 28,013 bytes, code ratio
+1.35), and 169 of the 190 called routines are byte-exact against Atari's ROM on random in-domain
+states; the 4 failures are at sites the translator marks for hand work. Nothing is hand-finished,
+nothing has run on hardware.
 
 ## Decisions so far
 
@@ -10,6 +14,11 @@ begun: the capture and the host AVG interpreter work and match MAME. No 6809 cod
   mouse (proportional, via `SS.MsDelta`), joystick (constant rate, buttons 0/1).
 - **D8 (user):** the math coprocessor at `$FEE0` is approved.
 - **`SS.MsDelta` $D0 (user):** layout approved (plan 6.1). Not coded.
+- **D6 register model (user, 2026-09-22): model B** — 6502 X and Y in the zero-page
+  pseudo-registers `<RX`/`<RY` (pointers `RXP`/`RYP` at $B8-$BB), B always scratch (section
+  "D6 pilot"). **The `pilot/pilot.d` conventions approved too (user, same day):** U/DP = the data
+  area, the arcade's 2K page for page; `RXP`/`RYP` at $B8-$BB; port variables from $800 (`POKIMG`);
+  `(zp),Y` pointers big-endian logical addresses; the coprocessor divide masked.
 - **D3 text (user):** glyph masks on a third, front bitmap, redrawn only when the text changes;
   two sizes rendered on the host from the vector ROM (plan D3).
 - **The rest (D2, D5, D6, D7, D9, D10):** the plan's recommendations stand unless the user says
@@ -135,11 +144,345 @@ Top mnemonics: LDA 1,395, STA 992, JSR 392, LDX 267, LDY 242, CMP 199, RTS 193, 
 Note for the translator: HLL65's `ELSE` is `CLV` plus an always-taken `BVC`, so the V flag does not
 survive an `ELSE`.
 
-**Stage 0 is complete.** Next: the D6 pilot.
+**Stage 0 is complete.**
+
+## D6 pilot (2026-09-22, host only) — for review
+
+Three routines translated by hand from 6502 to position-independent 6809 under both register models,
+exactly as the translator would emit them, then checked against Atari's own code in the Rev 3 ROM.
+**No translator and no game code has been written; that waits for the review.**
+
+### What was built
+
+| File | What it is |
+|---|---|
+| `tools/cpu6502.py` | NMOS 6502, cycle-counted (page-cross and branch penalties), and **MAME's Math Box** ported from `mathbox.cpp`; loads the Rev 3 program ROM as MAME's `ROM_START(tempest)` does. The oracle |
+| `tools/cpu6809.py` | 6809, the whole documented instruction set, cycle-counted with the indexed extras |
+| `tools/romfind.py` | Finds a source routine in the Rev 3 ROM from its opcode skeleton (m65parse lines, HLL65 expanded as `HLL65.MAC` assembles it) and returns every label's address. `ALEXEC.MAP` is linked from Rev 1 names, so this is how Rev 3 addresses are got |
+| `tools/m65parse.py` | Now tracks the `.ASECT` location counter, so RAM labels have addresses (`FRTIMR` $53 and `TBHD` $50 agree with what stage 0 found in the ROM). The mode census is unchanged |
+| `tools/d6pilot.py` | The differential test and the measurements; also writes `pilot/arcade.d` (symbols from the source) and `pilot/sound.bin` (the sound table, from the ROM) |
+| `pilot/` | `pilot.d` (conventions), `worscr.a` (both models), `modsnd_a.a`, `modsnd_b.a`, `dspnym_a.a`, `dspnym_b.a` |
+
+Rev 3 addresses found: `WORSCR` $C098, `MODSND` $CD0A, `FSNDON` $CCC7, `DSPNYM` $B498, `VGSTAT` $DF4C,
+`VGYAB1` $C765 (and `MOVCUR` $9749, consistent with stage 0's clamp at $975B).
+
+**The routines.** `WORSCR` (`ALDIS2.MAC:2208`, arithmetic and the Math Box); `MODSND`
+(`ALSOUN.MAC:270`, table-driven, X and Y both live); and `DSPNYM` (`ALDIS2.MAC:457`, the nymphs,
+a builder with fourteen `STA NY,VGLIST` a nymph) **together with everything it calls**: `VGSTAT`,
+`VGADD2`/`VGADD3`, `VGADD`, `VGSCA1`/`VGSCAL` (`ALVGUT`) and `VGYAB1`/`VGYABS` (`ALDIS2:3240`).
+
+### The test
+
+`d6pilot.py` gives Atari's routine (run from the ROM on the host 6502) and the translation (on the
+host 6809) the same inputs, then compares **all 2K of arcade RAM** (less the 6502's stack top
+$1D0-$1FF and the four pseudo-register bytes), **all 4K of vector RAM**, the **POKEY register image**,
+and the 6502's **A, X and Y**. Each 6809 case runs **twice, under two layouts** — code at $8000 and at
+$A1E7, the data area at $1000 and $5300, the vector-RAM window at $4000 and $2000 — and must give the
+same answer and the same cycle count both times, which is the position-independence check.
+
+- **2,000 random cases per build**, with the edges forced: for `WORSCR` Δy = 0, a point behind the eye,
+  the saturation limits, and PZ = EZ / PX = EX; for `MODSND` every path (restart, kill, the 9-bit
+  table half, odd and even channels, `SINDEX`); for `DSPNYM` busy and empty nymph tables, the security
+  byte `QT1`, and a list pointer anywhere in vector RAM over a random background (stray writes show).
+- **`MODSND` also plays the game's own sounds for 5,000 IRQs**: the ROM's `FSNDON` starts one of the
+  13 sounds at random, its changes are copied to the 6809, and both interpreters step in lockstep.
+- **Every executed 6809 instruction's cycle count is checked against lwasm's `--6809` listing** (828
+  instruction checks over the seven builds; none disagree).
+- **The test catches bugs:** three deliberate one-line mutations (a `blo` made `bls`, a POKEY image
+  offset, a list offset) were each caught, the subtlest at case 244 before the equality cases were
+  added.
+
+**Result: every case of every build is byte-exact against the ROM, in both layouts.** One bug was
+found on the way, in the host 6809 itself (`LEAS`/`LEAU` swapped), not in a translation.
+
+### The register models, as built
+
+Common to both:
+
+- **U = the data area's base and DP = its page, for the whole game.** The arcade's 2K sits in it page
+  for page: a zero-page variable is `<name`, anything else `name,U` (16-bit offset, 4 bytes, 8 cycles
+  against the 6502's 3 and 4). Port variables go past $800 (`POKIMG`, the POKEY image, is at $800).
+- **The pseudo-registers need nothing moved.** Zero page is not quite full: **$4B and $B8-$BC are
+  never allocated** (`ALCOMN.MAC:473` "UNUSED", and the gap between `SECUVG` and the EAROM's $BD).
+  `RXP` = $B8/$B9 and `RYP` = $BA/$BB are pointers: the high byte is the data area's page, set once at
+  start-up, the low byte the 6502 register, so **`ldx <RXP` is data base + X in one load**. $4B and
+  $BC stay spare. (The only wholesale zero-page writer outside self-test is the anti-tamper
+  `ZQVAVG`'s `INC X,0`, `ALWELG.MAC:3089`, which the port neutralises anyway.)
+- **Block-local pointer caches** (the translator's one real analysis): 6809 Y holds data base + X from
+  `ldy <RXP` until X changes; 6809 X holds a table or list pointer (`SOUND`+Y, `VGLIST`+Y) until Y or
+  the pointer changes, and **later `INY`s fold into the offset** (`sta 5,x`), so a run of
+  `STA NY,VGLIST / INY` costs 2 bytes and 5 cycles a store plus the `INY`'s own `inc <RY`.
+- **`VGLIST` is big-endian on the port** (a logical address; `<VGLIST` high): every 6502 byte access
+  to it is swapped, and `ldx <VGLIST` is the pointer. The list's contents stay little-endian, since the
+  interpreter is ours. Any other pointer used through `(zp),Y` gets the same treatment.
+
+| 6502 | Model A: X in B, Y in `<RY` | Model B: X in `<RX`, Y in `<RY` |
+|---|---|---|
+| `LDX #n` (2 B, 2 cyc) | `ldb #n` 2 B, 2 | `ldb #n / stb <RX` 4 B, 6 |
+| `INX`, `DEX` (1, 2) | `incb` 1, 2 | `inc <RX` 2, 6 |
+| `TAX` / `TXA` (1, 2) | `tfr a,b` / `tfr b,a` 2, 6 | `sta <RX` / `lda <RX` 2, 4 |
+| `CPX #n` (2, 2) | `cmpb #n` 2, 2 | `ldb <RX / cmpb #n` 4, 6 |
+| `INY`, `DEY` (1, 2) | `inc <RY` 2, 6 | same |
+| `LDA tab,X`, tab in RAM (3, 4) | cache: `stb <RX / ldy <RXP` 5, 10; then `lda tab,y` 4, 8 | cache: `ldy <RXP` 3, 6; then the same |
+| `LDA tab,Y`, tab in ROM (3, 4) | pointer: `leax tab,pcr / pshs b / ldb <RY / abx / puls b` 11, 28 when X is live; then `lda k,x` 2, 5 | `leax tab,pcr / ldb <RY / abx` 7, 16; then the same |
+| `STA (zp),Y` (2, 6) | pointer: `pshs b / ldx <zp / ldb <RY / abx / puls b` 9, 24 when X is live; then `sta k,x` 2, 5 | `ldx <zp / ldb <RY / abx` 5, 12; then the same |
+| `JSR` (3, 6), `RTS` (1, 6) | `lbsr` 3, 9 (`bsr` 2, 7); `rts` 1, 5 | same |
+| HLL65 `ELSE` = `CLV / BVC` (3, 5) | `bra` 2, 3 | same |
+
+Model A has to know when B is free: it needs **global liveness of the 6502's X** (which routines read
+X on entry) to avoid a `pshs b` at every pointer build, and a wrong answer there silently corrupts X.
+Model B's B is always scratch, so the translation is correct without any liveness at all.
+
+### Numbers (2,000 cases each; cycles are per call, the caller's `JSR` excluded)
+
+| Routine | Model | 6502 bytes | 6809 bytes | Size ratio | 6502 cycles min / median / max | 6809 cycles min / median / max | Cycle ratio (means) | Wall time at 8 MHz vs 1.512 MHz |
+|---|---|---:|---:|---:|---|---|---:|---:|
+| `WORSCR` | A | 214 | 188 | 0.88 | 192 / 195 / 220 | 224 / 293 / 315 | 1.45 | 3.7× faster |
+| `WORSCR` | B | 214 | 190 | 0.89 | 192 / 195 / 220 | 228 / 297 / 319 | 1.47 | 3.6× |
+| `WORSCR` | B, `SOFTDIV` | 214 | 213 | 1.00 | 192 / 195 / 220 | 228 / 2,105 / 2,253 | 9.45 | 0.6× |
+| `MODSND` | A | 139 | 234 | 1.68 | 282 / 775 / 1,292 | 614 / 1,544 / 2,562 | 1.99 | 2.7× |
+| `MODSND` | **B** | 139 | **219** | **1.58** | 282 / 775 / 1,292 | 634 / 1,514 / 2,426 | 1.95 | 2.7× |
+| `DSPNYM` + callees | A | 304 | 382 | 1.26 | 1,678 / 5,353 / 6,046 | 3,034 / 7,838 / 9,085 | 1.50 | 3.5× |
+| `DSPNYM` + callees | **B** | 304 | **372** | **1.22** | 1,678 / 5,353 / 6,046 | 2,982 / 7,786 / 9,033 | 1.49 | 3.6× |
+
+Playing the game's sounds (5,000 IRQs), `MODSND` averages 406 6502 cycles and **853 (B) / 865 (A)**
+6809 cycles: at the 246 Hz virtual IRQ that is 210K cycles a second, **2.6% of the CPU**. The
+6502's `WORSCR` counts are a floor: MAME's Math Box reports "done" at once, the real one does not.
+`MODSND`'s sizes leave out its 516-byte table on both sides.
+
+**`WORSCR` shrinks** because its Math Box traffic (register writes and `BIT MSTAT` polls) becomes one
+coprocessor divide, `DIVQ`: exact against MAME's Math Box for **every Δy from 1 to $7FFF**, which is
+everything `WORSCR` can produce after its own clamp, and for Δy = 0 the Math Box returns $FFFF, which
+`DIVQ` reproduces with an explicit test (the coprocessor's answer to a zero divisor is not defined
+anywhere). The divide runs with interrupts masked (D8). The `SOFTDIV` build is the D8 fallback; it
+passes, but this straightforward loop costs ~900 cycles a divide and would want work before use.
+
+### Recommendation: **model B**
+
+- **It is smaller and faster** in both mechanically translated routines (`MODSND` 219 against 234
+  bytes, `DSPNYM` 372 against 382; fewer cycles in both), and **ties** on `WORSCR`, where the only
+  difference is one store.
+- **The margin is small (2-6%)**, and it could go the other way on X-heavy code: over the whole game
+  model A saves on the 488 X-register instructions (`LDX` 267, `STX` 69, `DEX`/`INX` 73, `TAX`/`TXA` 56,
+  `CPX` 23 — roughly 800 bytes) and pays on every pointer build made while X is live (the `pshs b`
+  pairs) and on each X cache (`stb <RX` first) — several hundred bytes the other way. Size does not
+  decide it.
+- **What decides it is the translator.** B needs no register liveness to be correct; A does, and its
+  failure mode is a silently wrong X. With "compare against the listing" gone, the simpler and more
+  uniform translation is the one to trust.
+
+### What it implies for the module
+
+The game's translated code is about **13,460 bytes of 6502** (instructions and HLL65 branches counted
+from the source with m65parse: `ALWELG` 5,316, `ALDIS2` 4,265, `ALSCO2` 2,242, `ALEXEC` 795, `ALSOUN`
+299, `ALCOIN` 269, `ALVGUT` 211, `ALLANG` 60) plus **about 4,930 bytes of data** that copies across 1:1
+(messages, the well and skill tables, the sound tables, the cam bytecode). `ALTES2`, `ALHAR2` and
+`ALEARO` are not translated (dropped, rewritten into the frame loop, replaced by the settings file).
+
+| Code ratio | Game code | + data | + vector ROM | Total | Left of 40,192 for the platform layer, the AVG interpreter, glyphs, sound output |
+|---|---:|---:|---:|---:|---:|
+| **1.33** (model B, the two mechanical routines together: 591 / 443) | 17,900 | 4,930 | 4,096 | **26,930** | **13,260** |
+| 1.58 (the worst routine, `MODSND`) | 21,260 | 4,930 | 4,096 | 30,290 | 9,900 |
+
+For scale, Joust's platform-type files (`platform`, `gfx`, `snd`, `dma`, `sys`, `text`, `reloc`,
+`cmos`, `sched`) come to about 6,800 bytes of its module. **So the module fits, with vector ROM
+inside it,** and the plan's fallback (vector ROM into window A's block, section 3) is not needed on
+these numbers. The pilot over-weights the expensive idioms (`MODSND` is 16% `abs,Y` from a ROM table,
+the game 2%; `DSPNYM` is dense in `STA NY`), so **1.33 is the planning figure and likely high**.
+
+**Time.** The pilot's cycle ratios, 1.45-1.95 6809 cycles a 6502 cycle, are **0.27-0.37 of the 6502's
+time** at 8 MHz. Applied to stage 0's measurement of the 6502's work a game frame (median 21.4 ms, 99%
+41.3 ms), the translated game needs roughly **6-8 ms median and 11-15 ms at the 99th percentile** of
+the 36.6 ms frame, before the interpreter and `SS.BmLine` (stage 0's estimate 4.4 ms median, 9 ms
+worst, at an unmeasured per-record cost).
+
+### Rules the translator inherits from the pilot
+
+1. **Carry.** After a 6809 subtract or compare, C means *borrow*, the 6502's opposite. Branches map
+   (`IFCS` after `CMP` → `blo` to the else), and `SBC` chains stay consistent because both CPUs feed
+   their own convention forward. **Any other consumer of a compare's carry** (a rotate, an `ADC`) is
+   inverted and must be flagged: `DSPNYM`'s `CMP I,50 ... ROL/ROL/ROL/AND I,3` is one, harmless only
+   because the `AND` drops the bit.
+2. **Flags the 6502 leaves alone.** 6809 `STA`, `LDA`, `CLR`, `COMA` all set flags; `PULS` sets none
+   where `PLA` sets N and Z. The translator needs flag liveness to use `CLR`/`CLRA`/`COMA` (they clear
+   or set C) and to add a `TSTA` after a `PULS A` whose flags are read. None were read in the pilot.
+3. **`SEC; SBC` → `suba`, `CLC; ADC` → `adda`**; a lone `SEC; ADC` (`VGADD`) stays `orcc #1 / adca`.
+4. **HLL65 `ELSE` → `bra`**, one byte shorter; V does not survive it on either CPU.
+5. **zp,X wraps within page 0 on the 6502 and not on the 6809.** Nothing in the pilot wraps; the
+   translator must check each zp,X table's bound.
+6. **`JSR` and `JMP` between files are `lbsr`/`lbra`**; routine order is kept, so fall-throughs
+   (`VGADD3` into `VGADD`) stay fall-throughs.
+
+### Unchecked, and what would check it
+
+- **The coprocessor's divide latency.** The divider is a Xilinx IP core clocked by the CPU clock
+  (`JR_Math_Block.v:103`) whose configuration is not in the repository. `DIVQ` reads the quotient one
+  instruction after writing the dividend, as NitrOS-9's own `wild.asm` does (lines 1988-1992); nobody
+  here has proved that on hardware. A dozen-line harness on the K2 would.
+- **Whole-game ratio.** The figure above is from 443 bytes of 6502. The translator's first run gives
+  the real number file by file; the budget target will report it.
+- **Cycle counts are the data sheet's.** They assume no bus stretching on the F256.
+
+### For review
+
+1. ~~Model B~~ **Approved (user, 2026-09-22).**
+2. ~~The conventions in `pilot/pilot.d`~~ **Approved (user, 2026-09-22).**
+3. **Go (user, 2026-09-22):** D6 step 1, `tools/m65to09.py`, emitting what `pilot/*_b.a` shows (routine order, labels and
+   6502 line numbers kept), with `d6pilot.py` grown into the per-routine differential test.
+
+## D6 step 1: the translator (2026-09-23, host only)
+
+After the approvals, `tools/m65to09.py` translates the whole game mechanically into model B, as
+the pilot's `*_b.a` do. The output is the **first draft** of the plan's D6 ("mechanical first draft,
+hand finish, differential test"): nothing of it is hand-finished, nothing is in `src/`, nothing has
+run on hardware. `xlat/` is regenerated by the tool (gitignored).
+
+### The tools
+
+| File | What it is |
+|---|---|
+| `tools/romalign.py` | **Every statement of the 12 files aligned with the Rev 3 ROM** (link order from `ALEXEC.MAP`). Each file is cut into runs of statements whose bytes are known in shape, separated by macro calls of unknown size; runs must follow on exactly, or after a bounded gap. All 12 sections come out **exactly** the sizes in the link map ($9000-$DFDB, 20,444 bytes); **179 labels** known both from the alignment and from an aligned reference to them **agree, none disagree**. It supplies every label's Rev 3 address, every data byte, and the bytes the macros make. 177 labels inside macro-built data (the messages, the cam bytecode, the `VEC` pictures) have no exact place, and need none: nothing names them except in label differences, whose values the ROM bytes already hold |
+| `tools/m65to09.py` | **The translator.** Writes `xlat/*.a` in link order plus `port.d`, `arcade.d`, `stubs.a` and the 4K `vrom.bin`, and assembles `xlat/tempest.bin` with lwasm, retrying short branches that do not reach as long ones |
+| `tools/xlattest.py` | **The differential test on the translated module**: named routines with their case generators (MODSND, DSPNYM), or `--fuzz`, every routine a JSR reaches on random RAM; `--trace` prints where the 6502's and the 6809's source-line paths part |
+| `tools/m65parse.py` | Now: MACRO-11's **six-character symbols** (`INDYLOC` is `INDYLO`), the `.ASECT` location counter seen by assignments (`CBUF1 =.`), a line's radix, `#` immediates, RAM labels and `.GLOBL`s |
+| `tools/cpu6502.py` | Now loads the **vector ROM at $3000** too (the CPU reads it), and records zero-page index wraps and decimal arithmetic on non-BCD digits for the fuzz |
+
+### What the translator does
+
+- **Model B throughout**, with the pilot's block-local caches (6809 Y = data base + X, 6809 X = list
+  or table pointer + Y), `INX`/`INY` folded into offsets, and caches kept across a join when every
+  way into it agrees (only joins that branches alone can reach: a source label may be a JSR or
+  dispatch target).
+- **Flags as a whole-program dataflow**: backward liveness of N, Z, V, C through JSR and RTS (an
+  RTS is live in what is live after its routine's calls; routines entered only by Atari's RTS
+  dispatch return where the dispatcher was called from; `PHP` is paired with its `PLP`), and forward
+  tracking of how the 6809's CC holds the 6502's (carry inverted after a subtract or compare,
+  `CLC`/`SEC`/`CLV` held as constants, N and Z disturbed by stores and pointer set-ups). At every
+  join, call and return the live flags are put into 6502 form (`tfr cc,b / eorb #1 / tfr b,cc`
+  inverts a carry); a branch on an inverted carry is simply inverted when nothing downstream reads
+  it; a store that would change live N/Z the 6502 keeps runs inside `pshs cc / puls cc`.
+- **Decimal mode as a dataflow** (`SED`...`CLD` across loops and calls): `ADC` in decimal mode gets
+  `daa`. ZQAT4C's `SED` (anti-tamper sabotage, `ALEXEC:267`) is neutralised.
+- **`BIT`** by what is read after it: N only → `tst`, Z only → `bita`, V only → `ldb m / andb #$40 /
+  addb #$40` (V = bit 6 exactly).
+- **Atari's RTS dispatch** (`LDA i,T+1 / PHA / LDA i,T / PHA`, then an RTS; seven sites) becomes
+  one jump, and its table becomes 6809 offsets from itself (`fdb target-T`) with a parallel table of
+  the 6502 words' low bytes, so A, N and Z at the target are exactly the 6502's.
+- **The address macros** `LDAL`/`LDAH`/`LAH`/`LXL` are instructions; a vector-RAM address stored
+  next into a CPU pointer is **relocated to window A** (`lda VWIN,u / adda #hi-$20`: the window is 8K
+  aligned, so only the high byte moves), one used for a `JSRL` stays an AVG address.
+- **I/O**: POKEY audio registers go to `POKIMG` by the symbol the source names (`STA X,AUDF2-8` is
+  POKEY 2 even though its value is POKEY 1's AUDCTL); colour RAM to `CLRSHD` (for `SS.ClutWrite`);
+  vector ROM reads to the module's `VROM`; everything else to a named shadow `HW_xxxx`, marked HAND.
+- **Data is the ROM's own bytes.** One original quirk found by the test: MODSND reads the last
+  sound sequence's `0,0` terminator's NUMBER byte from the code after the table (IPEXPL's `LDA
+  I,SIDDI`); the module repeats those three ROM bytes after the table so the port reads the same.
+
+### The draft
+
+**28,013 bytes**, including the 4,096-byte vector ROM. **The translated game code is 17,829 bytes
+against 13,188 bytes of 6502 instructions: a ratio of 1.35**, the pilot's planning figure (1.33).
+Per file:
+
+| File | 6502 bytes | 6809 bytes (code + data) |
+|---|---:|---:|
+| ALWELG | 6,320 | 8,123 (7,042 + 1,081) |
+| ALDIS2 | 5,610 | 7,172 (5,789 + 1,383) |
+| ALSCO2 | 2,310 | 3,202 (3,147 + 55) |
+| ALLANG | 1,746 | 1,770 (84 + 1,686) |
+| ALEXEC | 865 | 1,094 (986 + 108) |
+| ALSOUN | 733 | 892 (458 + 434) |
+| ALVROM (CPU side) | 326 | 326 (data) |
+| ALVGUT | 211 | 323 |
+| ALCOIN | 269 | 269 (kept as 6502 bytes: HAND) |
+| ALHAR2, ALEARO | 522 | 725 (to be replaced by the platform layer) |
+| vector ROM | (4,096) | 4,096 |
+
+So the module budget stands as the pilot said: about **27.3K** for the game with its data and
+vector ROM once ALCOIN is translated and ALHAR2/ALEARO give way to the platform, **leaving about
+12.9K of the 40,192** for the platform layer, the AVG interpreter and the rest. Cycles: the
+generated MODSND runs at **1.97** 6809 cycles a 6502 cycle, DSPNYM at **1.54** (the hand pilot:
+1.95, 1.49).
+
+### Hand work left, as the translator marks it (`* HAND:` lines)
+
+| Category | Sites | What |
+|---|---:|---|
+| hardware | 92 | switch, option, watchdog, VG, EAROM, Math Box and coin registers: shadows `HW_xxxx` the platform layer fills or ignores |
+| address-table | 33 | `.WORD` tables of 6502 addresses: ALWELG's skill table `WTABLE` (pairs of ROM-table and RAM addresses), ALLANG's language pointers, one self-word (`ALDIS2:1033`) |
+| vram-table | 28 | `.WORD` tables of vector-RAM addresses (`BUFASL`, `BUFBSL`, `BUFSWL` and kin): relocated to window A at start-up, as the plan says |
+| vram-absolute | 18 | vector RAM by absolute address: translated through `VWIN`, to be checked |
+| bit, flag-lost | 8 | two `BIT`s that need both V and Z, two that need N and Z, two calls into routines the port does not have (`GETOP3`, `MOOLAH`) |
+| irq, stack, brk | 5 | the IRQ (`ALHAR2`) and `SEI`/`CLI` around the POKEY check |
+| stub | 3 | `GETOP3` (in the dropped self-test), `MOOLAH` and `RESET` (COIN65 and the reset code) |
+| decimal | 2 | an `SBC` in decimal mode (`PRORAT`'s seconds countdown) and an `ADC` reached in both modes |
+| dispatch | 2 | two state-table entries into the dropped self-test: `DSPSYS` in DROUTAD, ALTES2's entry ($D7E1) in ROUTAD |
+| coin65 | 1 | ALCOIN is COIN65's macros; its 269 bytes are still 6502 |
+
+Plus what was always going to be hand-made: **WORSCR and CASCAL on the coprocessor** (the pilot's
+`worscr.a` is the model), and the **start-up relocation** of the pointer tables and pointer
+constants (Joust's `reloc.a` way).
+
+### The test, and what it found
+
+**The pilot's routines from the translator are byte-exact**: MODSND and DSPNYM with their callees,
+2,000 random cases each and 5,000 IRQs of the game's own sounds, at two code addresses.
+
+**The fuzz: every routine a JSR reaches (190), on random RAM, against the ROM.** A case the game
+cannot produce is skipped, not compared, and the rules for "cannot produce" are themselves a list
+of what the port assumes: a data read of ROM code, or an index carrying a read out of its table's
+stretch of ROM data; a zero-page index that wraps (none in real use found); an indexed or indirect
+access landing on a pointer byte, a pseudo-register or the 6502 stack; decimal arithmetic on
+non-BCD digits; a read through a pointer into ROM or outside RAM and vector RAM (those pointers are
+relocated at start-up); a write carried onto POKEY by another device's index; a Math Box read.
+Variables the game keeps small (`PLAYUP`, the state and type indices, the dispatchers' arguments)
+are drawn from their real ranges.
+
+| Result (30 random cases a routine) | |
+|---|---:|
+| Routines passing, every in-domain case byte-exact | **169** |
+| Routines failing | **4**, all at HAND sites: INICHK, GAMSTA, INILIT (`GETOP3`), ENDGAM (`BIT` N and Z) |
+| Routines with no in-domain case | 17: the Math Box users (through WORSCR/CASCAL: CHPLKI, SCAPIC, CALOUT, DSTARF, TIPACT, ...) and routines that work through ROM pointers or address tables (RNKDSP, DSPCRD, CONTOU, ...) |
+| Cases compared, all byte-exact | 4,395 (1,186 skipped) |
+
+**Translator bugs the test found and that are fixed**: code macros emitted as 6502 bytes; an
+edit that dropped `BCC`/`BCS` from the flag table (every explicit carry branch looked unused); a
+store through a pointer taken for a store to it (the list cache thrown away at every `STA
+NY,VGLIST`); POKEY 2 mapped by value; labels keyed by name across files (ALSCO2's private `VGCNTR`
+shadowing ALVGUT's); caches kept across a source label that is also a JSR target; macro-made words
+anchoring the alignment in the wrong place (ALVROM's `JMPBLO`, which sent a switch pointer into
+code). **Harness bugs likewise**: the 6502 had no vector ROM, its flags were never reset between
+cases, memory was not cleared between cases, a layout overflowed 64K.
+
+**What the fuzz is not**: random states, not game states. It shows the translation does what the
+6502 does from any in-domain state; it does not show a game is played correctly, and its coverage
+is thin where routines work through relocated pointers (the messages) until relocation exists.
+
+### Decisions (user, 2026-09-23)
+
+1. **Approved:** `xlat/` is generated and never edited; hand-finished code lives in `src/`, taken
+   from the draft and re-tested with `tools/xlattest.py`.
+2. **Approved, the recommended order:** the coprocessor WORSCR/CASCAL (from the pilot); start-up
+   relocation of the pointer tables and constants; the six flag and `BIT` sites; PRORAT's decimal
+   `SBC`; ALCOIN; the hardware shadows as the platform layer's seams.
+3. **Approved:** extend the test with recorded game states (MAME RAM at frame boundaries, from
+   `avgcap.lua`).
+
+### Review points as put (answered above)
+
+1. The draft's shape: `xlat/` generated, hand-finishing in `src/` from it (the translator's output
+   is regenerated, never edited).
+2. The hand-work list above, and its order. Proposed: the coprocessor WORSCR/CASCAL (from the
+   pilot); start-up relocation of the pointer tables and constants; the six flag and `BIT` sites;
+   PRORAT's decimal `SBC`; ALCOIN; the hardware shadows as the platform layer's seams.
+3. Whether to extend the test with **recorded game states** (MAME's RAM at frame boundaries, from
+   `avgcap.lua`) so that routines run on states the game really produces.
 
 ## Open items
 
 1. The line-engine holes (FPGA developer).
 2. `tline` for stage 1, when the core is fixed: above all the per-record cost.
-3. The rest of stage 0 (above), then the D6 pilot.
+3. **The hand work** the translator lists, in the approved order (D6 step 1, "Decisions"), and the
+   recorded-state test.
 4. `SS.MsDelta` storage (5 bytes of vtio statics, 242 → 247 of 256).
+5. The coprocessor divide's read-after-write timing on hardware (D6 pilot, "Unchecked").

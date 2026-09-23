@@ -16,28 +16,37 @@ READ FIRST:
   - docs/port-guide.md (generic platform guide) and, from ~/projects/wild/joust/docs, only as needed:
     grfdrv256-api.md, bitmap-api.md, driver-performance.md.
 
-WHERE THINGS STAND (2026-09-22): STAGE 0 IS COMPLETE (host only, all committed). The tools:
-tools/avgcap.lua (stock MAME + Lua: display-list capture, a scripted player, 6502 frame timing, POKEY
-log), tools/avgview.py (literal port of MAME's Tempest AVG, 320x240 renderer, matches MAME's own
-snapshots), tools/glyphs.py (the D3 font from the vector ROM), tools/m65parse.py (the MAC65 reader).
-Captures go to captures/ (gitignored; regenerate with the tools). Key numbers: a played frame needs
-148 line records median, 305 max, once characters are glyphs; pixels <= ~3.6K; the 6502 works 21.4 ms
-of each 36.6 ms game frame (27.1 Hz), 99% 41 ms; indexed addressing is ~15% of live instructions.
+WHERE THINGS STAND (2026-09-23): STAGE 0 COMPLETE; D6 PILOT DONE (model B and the pilot/pilot.d
+conventions approved); D6 STEP 1, THE TRANSLATOR, DONE AND REVIEWED. All host only, all committed.
+docs/status.md, sections "D6 pilot" and "D6 step 1: the translator", has the details and decisions:
+  - tools/romalign.py aligns every source statement with the Rev 3 ROM (all 12 sections exact
+    against ALEXEC.MAP): label addresses, data bytes, macro output.
+  - tools/m65to09.py translates the whole game to model B 6809 into xlat/ (generated, gitignored,
+    never edited): 28,013 bytes with vector ROM, code ratio 1.35, "* HAND:" markers for the rest.
+  - tools/xlattest.py runs translated routines against the ROM on the host (MODSND, DSPNYM, or
+    --fuzz for all 190 called routines; --trace shows where two paths part). 169 pass, 4 fail at
+    HAND sites, 17 have no in-domain random case yet. tools/d6pilot.py still tests the pilot.
 
 DECIDED: Rev 3; D3 glyph masks on a front text bitmap; D4 keyboard (arrows, Shift fire, z zapper) +
-mouse (SS.MsDelta, approved) + joystick, no spinner; D8 math coprocessor approved. The rest of the
-plan's recommendations stand unless I say otherwise.
+mouse (SS.MsDelta, approved) + joystick, no spinner; D6 model B and its conventions; D8 math
+coprocessor approved. Translator review (2026-09-23): hand-finished code goes in src/, taken from
+xlat/; the hand-work order below; a recorded-game-state test. The rest of the plan's
+recommendations stand unless I say otherwise.
 
 HARDWARE: the rc16 line engine DROPS PIXELS (gaps that move run to run; K2, two cores). The FPGA
 developer is on it and we ASSUME A FIX. Re-run bmtest C then L, and C then F, on each new core.
 
-THIS SESSION: the D6 pilot. Translate WORSCR (ALDIS2:2208), MODSND (ALSOUN:270) and one display-list
-builder that uses STA NY,VGLIST into 6809, under the plan's two register models (A: 6502 X in B via
-ABX, Y in a page-1 byte; B: X and Y both in page-1 bytes), position-independent, lwasm. Measure size
-and cycles for each, check each against Atari's routine with a host 6502 emulator on the same inputs
-(the ROMs rebuild byte-identical, so the original binary is the oracle), and recommend a model with
-the size ratio it implies for the 40,192-byte module. Write it into docs/status.md. Then stop for my
-review before any translator or game code. No SS call code until I approve it.
+THIS SESSION: the hand work, in the approved order, each piece re-tested with tools/xlattest.py
+against the ROM before the next:
+  1. WORSCR and CASCAL on the coprocessor (pilot/worscr.a is the model; CASCAL's divide is N=24,
+     a 16-bit fraction, docs/port-tempest.md section 6.2), so the Math Box users get tested.
+  2. Start-up relocation of the pointer tables and pointer constants (the "address-table",
+     "vram-table" and address-constant HAND sites), Joust's reloc.a way.
+  3. The six flag and BIT sites; PRORAT's decimal SBC; ALCOIN (COIN65) translated.
+  4. The recorded-state test: extend tools/avgcap.lua to dump MAME's 2K RAM at game-frame
+     boundaries in a played game, and run routines in xlattest.py from those states.
+The hardware shadows (HW_xxxx) stay as the platform layer's seams for now. Update docs/status.md as
+each piece lands; stop and report at the end. No SS call code until I approve it.
 
 WHAT ONLY I CAN SUPPLY: hardware runs (tline once the core is fixed), new cores, and the decisions.
 
@@ -68,6 +77,9 @@ TOOLING (all in the Joust tree, shared):
   - lwasm with nosymbolcase: scan case-folded for clashes. A local label's (name@) scope ends at a BLANK
     line. A new source file must join the makefile's SOURCES or make silently checks old listings.
   - F$Sleep with X=1 only yields; X=2 waits one 60 Hz tick.
+  - The D6 test: python3 tools/d6pilot.py (-n cases; ~90 s at 2,000). It calls lwasm.orig --6809
+    directly: the coco-shelf "lwasm" wrapper adds --map/--list and fails with --format=raw. The
+    listing's cycle counts are 6809 ones only with --6809 (without it lwasm counts 6309 cycles).
   - The .MAC sources use CRLF line endings, and ALSOUN/MBUDOC have stray CRs: normalise a copy with
     sed 's/\r$//' | tr '\r' ' ' so line numbers match the originals.
 ```

@@ -19,3 +19,9 @@ __pycache__/
 
 # Stage 0 captures and renders (tools/avgcap.lua, tools/avgview.py): regenerable
 /captures/
+
+# D6 pilot builds (tools/d6pilot.py assembles pilot/*.a here)
+/pilot/build/
+
+# The translator's output (tools/m65to09.py writes it; regenerable)
+/xlat/

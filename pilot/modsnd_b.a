@@ -1,0 +1,94 @@
+* modsnd_b.a - MODSND (ALSOUN.MAC:270), register model B: 6502 X and Y in <RX and <RY.
+*
+* The sound interpreter, stepped once per (virtual) IRQ.  The mechanical translation, with the
+* block-local rules the translator would apply: 6809 Y caches the data base + X from "ldy <RXP"
+* until X changes, and 6809 X points into a ROM table at SOUND + Y (+$100 for the 9-bit half) until
+* Y changes.  The POKEY writes go to the register image POKIMG.  SOUND is the table as assembled
+* in the Rev 3 ROM (sound.bin, extracted by tools/d6pilot.py).
+
+	include	pilot.d
+	include	arcade.d
+
+MODSND	ldb	#NCHANL-1		LDX I,NCHANL-1
+	stb	<RX
+ms1@	ldy	<RXP			BEGIN
+	lda	POINT,y			LDA X,POINT
+	lbeq	ms9@			IFNE
+	ldb	<RX			CPX SINDEX
+	cmpb	<SINDEX
+	lbeq	ms9@			IFNE
+	dec	FRAMES,y		DEC X,FRAMES
+	lbne	ms9@			IFEQ
+	dec	COUNT,y			DEC X,COUNT
+	bne	ms5@			IFEQ
+RESOUN	inc	POINT,y			INC X,POINT
+	inc	POINT,y			INC X,POINT
+	lda	POINT,y			LDA X,POINT
+	asla				ASL
+	sta	<RY			TAY
+	bcs	ms2@			IFCC
+	leax	SOUND,pcr		LDA Y,SOUND+STVAL
+	ldb	<RY
+	abx
+	lda	STVAL,x
+	sta	CURRENT,y		STA X,CURRENT
+	lda	NUMBER,x		LDA Y,SOUND+NUMBER
+	sta	COUNT,y			STA X,COUNT
+	lda	FRCNT,x			LDA Y,SOUND+FRCNT
+	bra	ms3@			ELSE
+ms2@	leax	SOUND+$100,pcr		LDA Y,SOUND+STVAL+100
+	ldb	<RY
+	abx
+	lda	STVAL,x
+	sta	CURRENT,y		STA X,CURRENT
+	lda	NUMBER,x		LDA Y,SOUND+NUMBER+100
+	sta	COUNT,y			STA X,COUNT
+	lda	FRCNT,x			LDA Y,SOUND+FRCNT+100
+ms3@	sta	FRAMES,y		ENDIF / STA X,FRAMES
+	bne	ms6@			IFEQ: channel still alive?
+	sta	POINT,y			STA X,POINT: no, kill it
+	lda	CURRENT,y		LDA X,CURRENT
+	beq	ms6@			IFNE: restart the channel?
+	sta	POINT,y			STA X,POINT
+	bne	RESOUN			BNE RESOUN (always)
+*					ENDIF / ENDIF / ELSE
+ms5@	asla				ASL (A = POINT, from the top)
+	sta	<RY			TAY
+	bcs	ms51@			IFCC
+	leax	SOUND,pcr		LDA Y,SOUND+FRCNT
+	ldb	<RY
+	abx
+	lda	FRCNT,x
+	sta	FRAMES,y		STA X,FRAMES
+	lda	CHANGE,x		LDA Y,SOUND+CHANGE
+	bra	ms52@			ELSE
+ms51@	leax	SOUND+$100,pcr		LDA Y,SOUND+FRCNT+100
+	ldb	<RY
+	abx
+	lda	FRCNT,x
+	sta	FRAMES,y		STA X,FRAMES
+	lda	CHANGE,x		LDA Y,SOUND+CHANGE+100
+ms52@	ldb	CURRENT,y		ENDIF / LDY X,CURRENT
+	stb	<RY
+	adda	CURRENT,y		CLC / ADC X,CURRENT
+	sta	CURRENT,y		STA X,CURRENT
+	lda	<RX			TXA
+	lsra				LSR
+	bcc	ms6@			IFCS: an AUDC byte - keep its distortion nibble
+	lda	<RY			TYA
+	eora	CURRENT,y		EOR X,CURRENT
+	anda	#$F0			AND I,0F0
+	eora	CURRENT,y		EOR X,CURRENT
+	sta	CURRENT,y		STA X,CURRENT
+ms6@	lda	CURRENT,y		ENDIF / ENDIF / LDA X,CURRENT
+	ldb	<RX			CPX I,8
+	cmpb	#8
+	blo	ms7@			IFCS
+	sta	POKIMG+8-8,y		STA X,AUDF2-8
+	bra	ms9@			ELSE
+ms7@	sta	POKIMG,y		STA X,AUDF1
+ms9@	dec	<RX			ENDIF / ENDIF / ENDIF / DEX
+	lbpl	ms1@			MIEND
+	rts
+
+SOUND	includebin	sound.bin

@@ -243,6 +243,12 @@ finish, differential test.**
    routine runs on the machine (or a host 6809 emulator, if one proves reliable), same inputs, compared
    outputs. The original binary is the oracle.
 
+*Pilot done 2026-09-22 (host only): `docs/status.md`, "D6 pilot". **Model B approved (user,
+2026-09-22).** The pilot puts the pseudo-registers in unallocated zero-page bytes ($B8-$BB) instead of page 1, and
+gives a code ratio of about 1.33.  **Step 1 done 2026-09-23** (`tools/m65to09.py`, draft in `xlat/`,
+ratio 1.35; `docs/status.md`, "D6 step 1"): reviewed 2026-09-23; hand work in `src/` next, in the
+approved order, plus a test on recorded game states.*
+
 **Before step 1, a pilot** on three routines chosen to stress it — `WORSCR` (arithmetic and the divide),
 `MODSND` (table-driven, X and Y both live) and a list builder with `STA NY,VGLIST` — translated under
 two register models, measured for size and cycles:
