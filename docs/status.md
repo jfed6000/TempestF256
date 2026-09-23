@@ -1258,6 +1258,16 @@ enemy shot, enemy line, slam, 3 seconds, pulsar off (silent: it only stops) — 
 and pulsation + explosion, 4 s each). Module 38,684 bytes; `make pic` clean. **On both disk
 images, with `RECUS` 150** (the game's run of that is the other test on this image).
 
+## Hardware: RECUS 150 on the new core (user, 2026-09-23)
+
+`9b167ec` on the K2 with the new core (doubled line FIFO): **3,429 game frames, 14,597 passes in
+245 s: 14.0 game frames and 59.6 passes a second.** 245 s is 14,700 ticks, so ~103 lost (0.7%),
+inside the sign-off's own error (whole seconds, ±60 ticks): **`RECUS` 150 holds on hardware** (the
+model lost 1.2%). User: "earlier levels definitely felt faster; slight slowdown on later levels as
+more enemies added". Not comparable one to one with the 640 build's 13.0 (that run had attract in
+it; this one is play into later levels). Two changes in this run (the core and `RECUS`), so the
+share of each is not known. `tsnd` not yet reported.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
