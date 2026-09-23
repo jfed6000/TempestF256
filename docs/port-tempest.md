@@ -254,7 +254,8 @@ counts since the last frame", and the game already clamps.
 - **Keys or a stick**, with the program ramping the rate while held. Needs no new call, and is the
   fallback whatever else is chosen.
 
-What hardware the user has or will get is the question that decides this (plan, D4).
+**Decided (2026-09-22): no spinner; keyboard, mouse and joystick** (plan, D4). The mouse needs
+`SS.MsDelta`, approved.
 
 ## 6. Sound and maths
 

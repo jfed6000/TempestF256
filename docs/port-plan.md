@@ -180,8 +180,21 @@ for nothing extra in code. If stage 0 shows text is a large share of a frame's p
 static parts (the score and high-score labels) to glyph masks on a second bitmap; Joust's `text.a` is
 the routine. Decide on stage 0's numbers.
 
-**D4. The spinner (yours: what hardware).** The arcade gives the game signed counts, 72 a turn, clamped
-to ±31 per game frame. Options:
+**D4. The controls — DECIDED (user, 2026-09-22).** No spinner is expected. **Keyboard, mouse and
+joystick**, all three, feeding the same `TBHD` counts:
+
+| Control | Rotate | Fire | Superzapper | Source |
+|---|---|---|---|---|
+| Keyboard | ← → at a **constant rate** | **Shift** | **`z`** (lower case: `SS.LiveKeys` returns unshifted codes) | one `SS.LiveKeys` a frame: arrows and Shift are sense bits, `z` a held key |
+| Mouse | X motion, **proportional** | left button | right button | `SS.MsDelta` (approved, section 6.1) |
+| Joystick | left/right at a constant rate | button 0 | button 1 | `SS.Joy` mode 2 |
+
+This is MAME's model too: the knob is an `IPT_DIAL` with `PORT_KEYDELTA(20)` (`tempest.cpp:612`), so
+keys and a digital stick turn it at a fixed rate while held, and a mouse drives it proportionally
+(`PORT_SENSITIVITY(100)`). How MAME scales 20 into encoder counts per frame is unchecked; the port's
+rate and the mouse's counts-per-turn scaling go in the settings file, tuned by feel against MAME.
+
+The options as first written, kept for the record:
 
 | | Hardware | Driver work | Recommendation |
 |---|---|---|---|
@@ -233,8 +246,8 @@ game frames of 2 or 3 ticks, averaging the arcade's 27.3 Hz, with `MODSND` and t
 IRQ. Alternative: a fixed 30 Hz, simpler and even, **10% fast**. The virtual IRQ is one routine, and 30 Hz
 is one constant, so stage 7a can show both.
 
-**D8. The integer coprocessor at `$FEE0` (yours: approval).** Recommendation: **ask for it as a second
-named absolute-address exception**, beside the VS1053. It is the Math Box's one divide in one step
+**D8. The integer coprocessor at `$FEE0` — APPROVED (user, 2026-09-22)** as a second named
+absolute-address exception, beside the VS1053. It is the Math Box's one divide in one step
 against 300-400 cycles in software, twice a projected point. Two conditions: `tools/piccheck` learns the
 range; and the divide runs with interrupts masked for its few instructions, because the unit is global
 and **`fm` already uses `$FEE0`** — another program on another terminal can interleave. A software
@@ -260,7 +273,7 @@ cocktail flip does not.
 
 ## 6. New and changed SS calls, for review — not to be coded before approval
 
-### 6.1 `$D0 SS.MsDelta` — mouse motion as counts (new; GetStat and SetStat)
+### 6.1 `$D0 SS.MsDelta` — mouse motion as counts (new; GetStat and SetStat) — APPROVED 2026-09-22
 
 `$D0` is free (it was `SS.KyDwn`), in the input group's neighbourhood with `SS.LiveKeys` `$C6`.
 
@@ -298,7 +311,12 @@ hard 256 (Joust's open item j); 247 fits, and it is the last easy 5 bytes.
 **Why not extend `SS.Mouse`:** its GetStat returns an absolute, clamped pointer, and CoCo code uses the
 same code with a different packet. A new code costs nothing and breaks nobody.
 
-### 6.2 `$E7 SS.BmLine` — two changes to an existing call
+### 6.2 `$E7 SS.BmLine` — changes to an existing call
+
+**It is already a batch call.** One `SS.BmLine` draws up to 255 lines from the caller's array; nothing
+in this plan calls it per line. What can still multiply the calls in a frame is (a) the FIFO filling,
+which makes the driver return short, and (b) a frame of more than 255 lines. (1) and (2) answer (a);
+(3) answers (b). The aim is **one call per frame**.
 
 **(1) Exact room, no layout change.** Today the driver stops a batch when fewer than **320** FIFO
 entries are free (`LD.Room`), the length of the longest possible line. Tempest's lines are mostly short,
@@ -320,6 +338,12 @@ would otherwise have handed back to the caller. The wait is bounded (about two f
 `SS.BmClear`'s mode 7); if it expires the call returns short with carry clear, exactly as today, so a
 caller's resume loop is still correct. grfdrv runs with the caller's interrupt mask, so the wait blocks
 no interrupts; it does hold grfdrv, which is synchronous by design.
+
+**(3) More than 255 records a call.** `R$U` is 16 bits but today anything above 255 is `E$IllArg`
+(`tsta; lbne`). Proposed: accept up to 1,024. The array is then up to 8K and can span three blocks of
+the caller's map, so the driver's buffer mapping (`MapCallBuf`, block plus the next) must advance a
+block as the record pointer crosses one — the main cost of this change. Old callers pass ≤ 255 and see
+no difference. Only if stage 0 shows frames above 255 visible lines.
 
 **Worth building only if stage 1 says so**: `D` and `V` show how often a Tempest frame fills the FIFO,
 and `S` shows what a call costs. If a frame's lines rarely exceed 4,096 pixels, neither change buys
