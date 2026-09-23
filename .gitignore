@@ -1,0 +1,18 @@
+# lwasm build products (the coco-shelf wrapper writes these next to the source)
+*.list
+*.map
+
+# Built OS-9 modules (make -C src rebuilds them; list each one here as it is added)
+/src/tempest
+
+# Editor and tool leavings
+*~
+*.bak
+.#*
+\#*#
+__pycache__/
+*.pyc
+.DS_Store
+
+# tempest_orig/ is Atari's source as released: keep every file in it, whatever its name
+!/tempest_orig/**
