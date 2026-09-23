@@ -185,7 +185,23 @@ real frames before any hardware run, and a picture to compare every later frame 
 - **Erase:** `SS.BmClear` on the other bitmap, 16-bit, one call.
 - **Show:** swap with one `SS.Layer`.
 
-What nobody has measured, and what the plan's first hardware stage measures:
+**First measurement, K2, 2026-09-22: bmtest's `F` key reported "SS.BmLine flood: drew 255 of them"**, with
+no error. That is 255 full-width lines, 81,600 pixels, in one call, and **the FIFO pacing never fired**:
+before every record the queue had at least 320 free entries. By the test's own criterion (written before
+anything was known) that is a fail, but it has two readings, and **which one is true is not yet known**:
+
+- **The drain keeps up.** The driver's per-record loop (an estimated 25-30 µs, most of it register
+  writes and the poll) is slower than the FIFO drains, so the queue never builds up. The whole batch
+  then takes ~7 ms and could fall entirely inside the visible part of one frame, when the FIFO drains.
+  This fits the RTL estimate of order 10⁵ pixels a frame. If it is right, pacing rarely matters and
+  the plan's `SS.BmLine` changes (1) and (2) buy little.
+- **The count read-back is wrong** (reads low or zero), so the check always passes and pixels past
+  4,096 are **lost silently**. Then some of the 255 lines would be missing or cut short on the screen.
+
+The screen decides it: every one of the 240 rows striped full width, rows 0-14 drawn twice, means the
+first reading. Stage 1's `D` key measures the drain directly.
+
+What else nobody has measured, and what the plan's first hardware stage measures:
 
 | Number | Why it decides something | Estimate, unchecked |
 |---|---|---|
