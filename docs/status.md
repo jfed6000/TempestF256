@@ -10,8 +10,10 @@ begun: the capture and the host AVG interpreter work and match MAME. No 6809 cod
   mouse (proportional, via `SS.MsDelta`), joystick (constant rate, buttons 0/1).
 - **D8 (user):** the math coprocessor at `$FEE0` is approved.
 - **`SS.MsDelta` $D0 (user):** layout approved (plan 6.1). Not coded.
-- **The rest (D2, D3, D5, D6, D7, D9, D10):** the plan's recommendations stand unless the user says
-  otherwise; D3 is now reopened by the numbers below.
+- **D3 text (user):** glyph masks on a third, front bitmap, redrawn only when the text changes;
+  two sizes rendered on the host from the vector ROM (plan D3).
+- **The rest (D2, D5, D6, D7, D9, D10):** the plan's recommendations stand unless the user says
+  otherwise. D9 loses its triple-buffer option (all three bitmaps are used).
 
 ## Hardware findings
 
@@ -65,7 +67,7 @@ and 0 (3.5), 31 distinct characters. So a host-rendered font needs **two sizes o
 drawn as masks in any colour. The VICKY text font and tile sets are fixed at 8×8 and cannot match
 either size; that is not a limit on masks, which are our own pixels.
 
-**Not yet done in stage 0:** a played game (only attract so far, whose demo is play-like), the 6502
+**Not yet done in stage 0:** `tools/glyphs.py` (the D3 font), a played game (only attract so far, whose demo is play-like), the 6502
 busy fraction, POKEY write logging, `tools/m65parse.py`.
 
 ## Open items

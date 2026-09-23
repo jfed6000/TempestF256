@@ -174,16 +174,25 @@ colour and beam intensity through the CLUT (`colour × 16 + intensity` is exactl
 port-tempest 4.3). No glow, no thick lines, no tricks. What it costs: nothing extra per line. What it
 gives up: the vector monitor's bloom. Revisit after stage 2's photograph, if at all.
 
-> **Reopened by stage 0 (2026-09-22, `docs/status.md`):** characters are ~226 of ~473 line records in
-> a play frame and nearly all on text screens. If `tline S` shows a record costs what is estimated,
-> glyphs win: the interpreter spots a `JSRL` into the character ROM (`$3000`-`$31E3`) and plots a
-> host-rendered mask of the same character instead of its 4-8 strokes.
+**D3. Text — DECIDED (user, 2026-09-22): glyph masks on a text bitmap.**
 
-**D3. Line-drawn text or glyph masks (yours).** Recommendation: **line-drawn**, because the text is
-already in the display list — the characters are vector-ROM subroutines, so the interpreter draws them
-for nothing extra in code. If stage 0 shows text is a large share of a frame's pixels, move only the
-static parts (the score and high-score labels) to glyph masks on a second bitmap; Joust's `text.a` is
-the routine. Decide on stage 0's numbers.
+- **Why:** characters are ~226 of ~473 line records in a play frame and nearly all on text screens
+  (`docs/status.md`), and every character costs the driver 4-8 records.
+- **The font:** Tempest's text uses exactly two scales (0 and 1; `docs/status.md`). A host tool
+  (`tools/glyphs.py`, stage 0) renders every character subroutine of the vector ROM (`$3000`-`$31E3`)
+  at both scales with `avgview`'s mapping and Bresenham, so a glyph is pixel for pixel what the line
+  engine would have drawn. About 40 glyphs × 2 sizes, one bit a pixel, drawn in any CLUT colour.
+- **The interpreter:** a `JSRL` into `$3000`-`$31E3` is not executed. It appends (character, beam
+  position, scale, colour, intensity) to a text list and advances the beam by the character's own
+  displacement, which the same tool records per glyph and scale.
+- **The text bitmap:** a third bitmap on the front layer, single-buffered, **redrawn only when the text
+  list differs from the last one drawn** (a score ticking, a message appearing, a blink). The rows
+  touched are cleared and redrawn through window A's spare block or a service mapping; a whole-bitmap
+  clear is `SS.BmClear`. Joust's `text.a`/`draw.a` are the model.
+- **Costs:** all three bitmaps are in use (lines ×2, text ×1), so D9's triple buffer is out. A text
+  change can tear for one frame. 30 more blocks of graphics memory in all.
+- **To check:** a character that overlaps the well (none seen in attract) would now sit in front of
+  it; and text drawn in play at a depth scale (none found in the source).
 
 **D4. The controls — DECIDED (user, 2026-09-22).** No spinner is expected. **Keyboard, mouse and
 joystick**, all three, feeding the same `TBHD` counts:
@@ -267,8 +276,8 @@ divide stays in the source behind a build flag, for comparison and in case you s
   clear for the next window and returns at once. Nothing waits; costs ten more blocks. Needs the fixed
   core's "CPU may run while a transfer is pending", which is its whole point.
 
-Recommendation: **start with the double buffer**; move to three only if stage 1's clear timing shows the
-wait.
+Recommendation: **the double buffer.** The triple buffer is no longer available: D3 puts text on the
+third bitmap.
 
 **D10. Scope (yours).** Recommendation: **drop** the self-test (`ALTES2`) and the anti-tamper checks
 (port-tempest 2.4, made to pass); **keep** the coin/credit logic (Joust did, with a coin key), the
