@@ -15,7 +15,10 @@ the service window).  After each pass (at its F$Sleep) it checks the SIDs agains
 Also counts re-gates (a louder volume or a new waveform) and prints, per step of the sequence, the
 channels that sounded.  It proves the mapping and the bookkeeping, not how it sounds.
 
-  python3 tools/sndtest.py [--seconds 45]
+With --game it runs the game instead ("tempest", played by osrun.py's script) and makes the same
+checks every pass: the game's own sounds, through the main loop's SndOut.
+
+  python3 tools/sndtest.py [--seconds 45] [--game]
 """
 
 import argparse
@@ -39,22 +42,25 @@ class SndHost(Host):
         self.keys = dict(keys)              # tick -> the key pressed then
         self.pending = []
         self.sid = bytearray(0x200)
-        self.sidbase = None
+        self.sidbase = None                 # the window the SIDs were last mapped into
+        self.taps = set()
         self.writes = 0
         self.gates_off_on = 0
         self.gate_seen_low = [False] * 6
+        self.remaps = 0
 
     def os9(self, fn):
         if fn == osrun.F_MAPBLK and self.x == SIDBLK:
             err = super().os9(fn)
-            if not err and self.sidbase is None:
+            if not err:
                 self.sidbase = self.u
-                self.map_io(self.u, self.u + 0x1FF, self.sid_r, self.sid_w)
-            elif not err and self.u != self.sidbase:
-                self.errors.append("the SIDs mapped again at another address")
+                self.remaps += 1
+                if self.u not in self.taps:
+                    self.taps.add(self.u)
+                    base = self.u
+                    self.map_io(base, base + 0x1FF, lambda a, b=base: self.sid_r(a, b),
+                                lambda a, v, b=base: self.sid_w(a, v, b))
             return err
-        if fn == osrun.F_CLRBLK and self.u == self.sidbase:
-            self.errors.append("the SIDs' window released while tsnd runs")
         if fn == I_READ:
             if not self.pending:
                 return E_NOTRDY
@@ -72,11 +78,17 @@ class SndHost(Host):
             return 0 if self.pending else E_NOTRDY
         return super().stat(get, code)
 
-    def sid_r(self, a):
-        return self.sid[a - self.sidbase]
+    def sid_here(self, base):
+        return self.mapped.get(base) == SIDBLK
 
-    def sid_w(self, a, v):
-        off = a - self.sidbase
+    def sid_r(self, a, base):
+        return self.sid[a - base] if self.sid_here(base) else self.mem[a]
+
+    def sid_w(self, a, v, base):
+        if not self.sid_here(base):         # the window holds another block now (the text's)
+            self.mem[a] = v
+            return
+        off = a - base
         self.writes += 1
         if off < 0x80 or 0x100 <= off < 0x180:
             chip, r = off >> 8, off & 0x7F
@@ -110,17 +122,17 @@ def want(audf, audc):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seconds", type=float, default=45)
+    ap.add_argument("--game", action="store_true", help="the game, not tsnd")
     a = ap.parse_args()
     module = open(os.path.join(SRC, "tempest"), "rb").read()
     sym = osrun.symbols()
-    h = SndHost(module, sym, osrun.script, keys={30: "r"})
+    h = SndHost(module, sym, osrun.script, keys={} if a.game else {30: "r"})
     execoff = module[9] << 8 | module[10]
     h.u, h.dp, h.s = DATA, DATA >> 8, 0x2000
-    h.mem[0x1F00:0x1F02] = b"s\r"           # the parameters
+    h.mem[0x1F00:0x1F02] = b"\r\r" if a.game else b"s\r"      # the parameters
     h.x, h.y = 0x1F00, 0x2000
     h.pc = MODBASE + execoff
-    sleep_pc = None
-    checked = bad = 0
+    checked = bad = deferred = 0
     maxvoices = 0
     steps = collections.OrderedDict()
     fails = []
@@ -130,9 +142,13 @@ def main():
             pc = h.pc
             if h.mem[pc] == 0x10 and h.mem[pc + 1] == 0x3F and h.mem[pc + 2] == osrun.F_SLEEP \
                     and h.x == 2 and h.sidbase is not None:
+                if not h.sid_here(h.sidbase):   # the text holds the window: SndOut waited (or ran
+                    deferred += 1               # before the text took it); nothing to check
+                    h.step()
+                    continue
                 checked += 1
                 img = h.mem[DATA + POKIMG:DATA + POKIMG + 16]
-                seq = h.mem[DATA + sym["TSSEQ"]] if "TSSEQ" in sym else 0
+                seq = 0 if a.game else h.mem[DATA + sym["TSSEQ"]]
                 gated = {v for v in range(6) if h.voice(v)["ctl"] & 1}
                 wanted = {}
                 for c in range(8):
@@ -166,7 +182,10 @@ def main():
     except Exit as e:
         print("exit: %s" % (e,))
     print("ran %.1f s: %d passes checked, %d wrong; %d SID writes; %d re-gates; at most %d channels"
-          " at once" % (h.cycles / HZ, checked, bad, h.writes, h.gates_off_on, maxvoices))
+          " at once; the SIDs mapped %d times" % (h.cycles / HZ, checked, bad, h.writes, h.gates_off_on,
+                                                 maxvoices, h.remaps))
+    if deferred:
+        print("passes that ended with the text in the window (not checked): %d" % deferred)
     for f in fails:
         print("  " + f)
     print("channels that sounded, per step of the sequence (TSSEQ offset: channels):")

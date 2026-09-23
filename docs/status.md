@@ -1268,6 +1268,28 @@ more enemies added". Not comparable one to one with the 640 build's 13.0 (that r
 it; this one is play into later levels). Two changes in this run (the core and `RECUS`), so the
 share of each is not known. `tsnd` not yet reported.
 
+## Sound in the game (2026-09-23, host and MAME) — untested on hardware
+
+`tsnd` on the K2 (user): "sounds good to me" — taken as D5 (a), the SIDs, accepted as it stands.
+**The game now plays it**: `SndInit` at start (a failure leaves the game silent), **`SndOut` once
+a pass** in the main loop after the virtual IRQs, `SndExit` while paused (hidden terminal) and
+`SndInit` on the way back, `SndExit` on every exit.
+
+**The window.** The SIDs share the service window with the text bitmap. The first build thrashed
+it: the text's drawing mapped its block, the next pass's `SndOut` mapped `$C4` back, the text
+mapped its block again — 412 `F$MapBlk` a minute against 140 without sound. **`SndOut` now waits
+while a game frame's drawing is under way and the text holds the window** (`DRAWNG`), so sound is
+late by up to a game frame on the few frames whose text changed: 204 a minute.
+
+**The cost** (`osrun.py`, 60 s of play): `SndOut` **145 µs a pass median**, 200 at 95%, 643 at
+most (a remap), 8.6 ms a second. It runs outside the drawing's budget, so **`BUDPAS` 12,500 ->
+12,300**: ticks lost 45 in 3,600 (44 without sound; 56 before the budget gave way), **15.0 game
+frames a second against 15.4 without sound**. `tools/sndtest.py --game` (120 s of play): **6,755
+passes checked, 0 wrong**, up to 4 channels at once, 996 re-gates, the SIDs mapped 109 times;
+374 passes ended with the text in the window (`SndOut` waited). `tsnd` unchanged (2,699, 0 wrong).
+The Wildbits MAME: the game and `tempest s` as before (no sound there). Module 38,714 bytes, on
+both disk images.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

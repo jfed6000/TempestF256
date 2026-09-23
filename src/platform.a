@@ -47,6 +47,7 @@ st1                 clr       ,x+
                     lbsr      GfxInit             bitmaps, CLUT, layers, display
                     lbcs      Quit
                     lbsr      InInit              the mouse, if SS.MsDelta answers
+                    lbsr      SndInit             the SIDs (a failure leaves the game silent)
                     lbsr      GamInit             the arcade's reset, less its self-test
                     leax      T0BUF,u             the time the loop starts (the sign-off's numbers)
                     os9       F$Time
@@ -174,12 +175,14 @@ cu1                 lbsr      ExitMsg             clear the screen and sign off
 *   away is not owed as virtual IRQs: the game stood still.  A frame's
 *   drawing that was under way goes on where it stopped.
 ********************************************************************
-PausWt              ldx       #30
+PausWt              lbsr      SndExit             silent while hidden (SndInit again on the way back)
+pw1                 ldx       #30
                     os9       F$Sleep
                     tst       SIGCODE,u
                     lbne      Done
                     tst       PAUSED,u
-                    bne       PausWt
+                    bne       pw1
+                    lbsr      SndInit
                     leax      CLRSHD,u
                     leay      CLSENT,u
                     ldb       #16

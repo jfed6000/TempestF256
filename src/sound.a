@@ -24,6 +24,8 @@
 *       sustain, so a louder volume, or a new waveform, re-gates.
 *   Written once a pass (60 Hz), where the arcade's POKEYs change at
 *   the IRQ's 246 Hz; only the registers that change are written.
+*   The window is shared with the text bitmap (text.a): while a game
+*   frame's drawing is under way and the text holds it, SndOut waits.
 *   Runs with U = the data area and DP its page.
 ********************************************************************
 
@@ -113,6 +115,13 @@ sxx                 rts
 ********************************************************************
 SndOut              tst       SNDUP,u
                     lbeq       sox
+                    lda       SWIN+W.Blk,u        the window: free, or the SIDs' already?
+                    beq       so0
+                    cmpa      #SIDBLK
+                    beq       so0
+                    tst       DRAWNG,u            the text drawing has it: not while the frame is drawn
+                    lbne      sox                 (the window would thrash between the two)
+so0
                     lbsr       SidMap
                     lbcs       sox
                     stx       SNDBAS,u
