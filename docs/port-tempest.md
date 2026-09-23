@@ -1,259 +1,357 @@
 # Tempest on the Wildbits F256: the port survey
 
 The per-game companion to `docs/port-guide.md`, which is the generic platform guide. **Read that first**;
-it holds everything that is true of any port — the logical-space budget, the PIC and data-area rules, the
+it holds everything that is true of any port: the logical-space budget, the PIC and data-area rules, the
 graphics/sound/input hardware, OS-9 citizenship, the driver work and the working method. This file holds
-only what is specific to Tempest, in the shape section 14 of the guide asks for.
+only what is specific to Tempest, in the shape section 14 of the guide asks for. The plan built on it is
+`docs/port-plan.md`.
 
-Status: **nothing is started**, and nothing here has been checked on hardware. Every number about the
-original should be re-checked against whatever source listing the port is made from before it is relied
-on.
+**Status (2026-09-22): the survey of Atari's source is done, and nothing is built or run.** Every fact
+about the original below was read from `tempest_orig/src` and cited by file and line; every fact about
+the platform was read from the NitrOS-9 tree, the Joust docs or the RTL. What is **unchecked** says so.
+Line numbers are the source files' own (CRLF lines, as an editor shows them).
+
+**The first version of this file (2026-09-20) was written before most of the driver work existed.** What
+changed, so nobody acts on the old text:
+
+| Old statement | Now |
+|---|---|
+| The line engine's registers are known only from the RTL; proving it is harness job one | **`SS.BmLine` exists and is confirmed on K2** (2026-09-21, a 16-line fan): batches of 8-byte records, a colour per record, up to 255 a call, and it stops early rather than overflow the 4,096-pixel FIFO. What is still unmeasured is **volume**: pixels drained per frame. bmtest's `F` key (255 full-width lines) has never been pressed |
+| "Erasing is the part with no obvious answer" | **`SS.BmClear` answers it.** One call fills a whole bitmap on the DMA engine, 76,800 bytes in about **384 µs** 16-bit. The rc16 DMA was **fixed on 2026-09-22** and Joust uses it: wait mode 7 (`DmaWt.Poll`), synchronous, `E$DevBsy` on timeout. **An unfixed core still wedges on this path**, and `fpga-6809-cores-staging/` does not carry the fix yet |
+| The DMA "stalls the CPU and runs only in a vertical-blanking window" | Still true of the fill itself as far as anyone knows, and it matters: mode 7 **returns when the fill is done, and the fill waits for the window at line 0** — the driver's own comment budgets "15 ms to line 0 plus 0.4 ms of transfer" (`grfdrv256.asm`, the `bcpoll@` note). So *when* the clear is called decides whether it costs 0.4 ms or a whole frame. **Unchecked on the fixed core**: whether a transfer still waits for the window, which is the first thing section 4.2's harness measures |
+| `SS.BmLine` holds interrupts off for its whole batch, ~7 ms at 255 records | **Wrong.** `vtio`'s `CallGrfDrvGo` saves the *caller's* CC before its `orcc`, plants it in the RTI frame (`vtio.asm:480-492`), and grfdrv runs with it; only the MMU edits inside grfdrv are masked. What a long batch does hold is **grfdrv** — no other terminal's output runs until it returns. `docs/bitmap-api.md` §15 in the Joust tree still carries the old claim |
+| A mouse's X delta is "the closest existing thing" to a spinner | Closer than that, but not usable as it stands: `mousedrv_ps2` **clamps X to 0-640 and draws a pointer** on every packet (section 5) |
+| The Math Box is "a hardware multiplier/divider" | The game uses **exactly one** of its operations, a divide, and its result is an ordinary integer quotient (section 6.2). The coprocessor at `$FEE0` does it in one step |
+
+`docs/port-guide.md` is stale in the same places — it still says the DMA was "never used here", that MAME
+draws only text, and it names `SS.KyLive`/`SS.KyDwn`, which are now `SS.LiveKeys`. It is shared
+byte-for-byte with the Joust tree, so it has been left alone here; correct it in both places together.
+
+---
 
 ## 1. The original, in the terms the survey cares about
 
 | Question | Tempest | Consequence |
 |---|---|---|
-| CPU | 6502 | A **translation**, not a transcription like Joust's 6809 source. See §5 |
-| Display | Colour vector (XY) monitor driven by an analog vector generator from a display list | No sprites, no framebuffer to map. §2 |
-| Geometry | A hardware "Math Box" doing the multiplies and divides for the tube projection | The F256 integer math coprocessor is its direct analogue. §4 |
-| Input | Spinner (rotary encoder), fire, superzapper, start buttons | A per-frame **delta**, not a level. §3 |
-| Sound | Two POKEYs | No POKEY on the F256. §4 |
-| Settings / high scores | EAROM | The guide's settings-as-a-file model answers this unchanged |
+| CPU | **6502 at 1.512 MHz** (MAME: 12.096 MHz / 8) | A **translation**, not Joust's transcription. Section 7 |
+| Display | Colour **Analog Vector Generator** (AVG) executing display lists from 4K of vector RAM at `$2000` and 4K of vector ROM at `$3000` | The line engine is the matching primitive. Section 4 |
+| Frame rate | **The game advances at most once per 9 IRQs**; the IRQ is 12.096 MHz / 4096 / 12 = **246.1 Hz**, so ≤ **27.3 game frames a second**, slower when a frame overruns | Not 60 Hz. The whole port's pacing follows from this. Section 3 |
+| Geometry | A Math Box on the aux board; the game uses one divide from it | One 16/16 divide on the F256 coprocessor. Section 6.2 |
+| Input | Spinner: an optical encoder into a **4-bit counter**, **72 counts a turn**; fire, superzapper, two starts | A per-frame **delta**. Section 5 |
+| Sound | Two POKEYs, **8 channels**, **13 sounds**, all from one table interpreter | No POKEY here. Section 6.1 |
+| Randomness | POKEY's `RANDOM`/`RANDO2`, read by 17 instructions in the game (`ALWELG` 15, `ALDIS2` 2) and by two anti-tamper checks | A software LFSR, stepped per read |
+| Settings / high scores | EAROM (`ALEARO`) | The guide's settings-as-a-file model |
+| Orientation | **Portrait** (MAME `ROT270`), but the used area is nearly **square** (MAME visible area 580 × 570 AVG units) | Fits a 240-row screen with side margins. Section 4.4 |
+| Code size | **~20 KB of 6502** (`$9000`-`$DFDC`) plus **4 KB of vector ROM** | Against 40,192 bytes of module. Section 7 |
 
-## 2. The display is the whole problem
+## 2. The source, file by file
 
-There is no framebuffer of moving objects to map onto sprites. There is a display list of line segments
-with colour and intensity, rebuilt every frame. So:
+Rev 2A(alt) is built from the `2` files and Rev 1 from their twins (section 8). Sizes are the object
+sizes in `ALEXEC.MAP`, which is dated 27-AUG-81 and was linked from the Rev 1 names; the Rev 2A objects
+differ by a handful of bytes (the diffs are tiny, section 8).
 
-- **Proving the line-draw engine is the first piece of work**, before the interface document is finished
-  and long before any game logic. Guide section 7 now has its registers and behaviour **read from the FPGA
-  source** (2026-09-18): the write and read maps differ, the status bit is *complete* rather than *busy*,
-  an out-of-range endpoint is silently dropped, the stride is hard-wired to 320, and pixels queue into a
-  4096-entry FIFO that **silently loses anything past 4096** and drains in a per-scanline slot. What the
-  RTL cannot tell us is the number this port's design rests on: **pixels drained per frame**, and from it
-  lines per frame at 60 Hz. The FIFO count registers measure it directly — that is harness job one.
-- **Erasing is the part with no obvious answer.** 320×240 at 8bpp is 76,800 bytes; a CPU clear through 8K
-  windows is ten block maps and 76,800 stores, which will not fit in a frame. In rough order of promise:
-  **a 2D DMA fill** — which the RTL says reaches all of RAM but runs only inside a vertical-blanking
-  window and stalls the CPU while it does (guide 6a), so the question is how many bytes one vblank moves;
-  draw into one bitmap while showing the other and clear the hidden one incrementally; clear only the
-  bounding boxes of what was drawn; or re-draw the previous frame's lines in colour 0, which is exact and
-  cheap *if* the engine is fast — and which is also bounded by the same FIFO budget as drawing them.
-  Measure before choosing.
-- **Keep the original's display-list build and replace only its emission.** The seam is "list of
-  transformed line segments with colour" — a better seam than Joust's, because the hardware primitive
-  actually matches what the game asks for.
-- **The vector monitor's look does not exist on this hardware**: no glow, no beam-intensity line weight, no
-  infinite resolution. Decide early and write it down: geometry-faithful, or appearance-faithful with
-  tricks. This decision drives the CLUT design, since intensity has to become colour.
-- **Text is vector-drawn on the original.** Whether to draw it with the line engine or as a glyph mask
-  into a bitmap (the guide's section 6 routine, already written for Joust) is a measurement from step 1,
-  not a preference.
+| File | Lines | Object | What it is | Port |
+|---|---:|---:|---|---|
+| `ALEXEC.MAC` | 602 | 865 | The executive: `MAINLN` (45), the state table `ROUTAD` and `EXSTAT` (66), credits, `NONSTA` (202), new game / life / wave preparation, score add | Translate |
+| `ALWELG.MAC` | 3,559 | 6,320 | The game: wave set-up and the skill tables, `PLAY` (867), `MOVCUR` (899, reads the spinner), enemies ("nymphs" become "invaders": flippers, tankers, spikers, fuseballs, pulsars), charges, collisions, explosions | Translate |
+| `ALDIS2.MAC` | 3,283 | 5,610 | **The display-list builder**: `DISPLAY` (47), `DENORM` (123), buffer control `SBCLOG`/`SBCSWI` (198), the well (`DSPWEL` 295, `BLDWEL` 2574), every object's picture, `CASCAL` (1444) and `WORSCR` (2208) — **all of the game's Math Box use** — star field, enemy lines | Translate |
+| `ALSCO2.MAC` | 1,396 | 2,310 | Scores, lives, messages (`INFO` 48), high-score table and initials entry, the skill-select ("rating") screen, the logo | Translate |
+| `ALVROM.MAC` | 2,498 | 326 + 4K | **Vector ROM**: the characters, every enemy/player/explosion picture as AVG subroutines, the score template, the `INVERS` table (1890) | Assemble as data |
+| `ALLANG.MAC` | 291 | 1,746 | Messages, four languages | Translate (tables) |
+| `ALSOUN.MAC` | 384 | 733 | **Sound**: 13 sounds as per-channel sequences, and `MODSND` (270), the interpreter the IRQ calls | Translate verbatim; new output stage |
+| `ALVGUT.MAC` | 394 | 211 | Vector-list utilities: `VGJSRL` (201), `VGSTAT` (224), `VGSCAL` (285), `VGVCTR` (336), digits | Translate |
+| `ALHAR2.MAC` | 186 | 222 | **The IRQ**: watchdog, **spinner read** (63), switch debounce, lamps, `MOOLAH`, `MODSND` (148), `FRTIMR` (149), VG restart (174) | Rewrite into the frame loop |
+| `ALEARO.MAC` | 260 | 300 | EAROM read/write of scores and bookkeeping | Replace with a file |
+| `ALCOIN.MAC` + `COIN65.MAC` | 22 + 663 | 269 | Atari's "universal" coin routine | Keep the credit logic, or simplify (Joust kept coin-op) |
+| `ALTES2.MAC` | 931 | 1,532 | Self-test: RAM/ROM/Math Box/POKEY tests, test patterns | Drop |
+| `ALCOMN.MAC` | 1,130 | — | Constants, RAM map, hardware addresses (`HARDWARE DEFINITIONS` 239) | The data-area layout |
+| `HLL65.MAC` | 116 | — | Structured-control macros: `IFxx`/`ELSE`/`ENDIF`, `BEGIN`/`xxEND` | The translator's first job |
+| `VGMC.MAC`, `ANVGAN.MAC`, `ASCVG.MAC` | | — | AVG instruction macros and the character set macros | The AVG instruction encoding |
+| `ALDIAG.MAC` | 167 | — | Stand-alone VG diagnostic PROM | Not in the game |
+| `MBUCOD.V05`, `MBUDOC.DOC` | | — | Math Box microcode and its documentation | Reference only |
+| `STATE2.MAC` | 33 | — | The AVG's state PROM | Reference only |
+| `ALDISP`, `ALSCOR`, `ALHARD`, `ALTEST` | | | The Rev 1 twins | Not used (section 8) |
 
-## 2a. Driving the line engine directly, and what it would cost
+### 2.1 Where the five things live
 
-**An option with terms, not a decision** (user's observation, 2026-09-20).  The question was whether a
-program on the *live* terminal could write the graphics registers itself, pausing when backgrounded via
-`SS.WSig`, and let `PushBuf`/`PullBuf` keep everything in step.  The answer is "partly, and not the way
-that sentence assumes", and the parts are worth having written down before Tempest starts, because this
-is the one place in the port where the temptation is real.
+**The display-list build.** `DISPLAY` (`ALDIS2.MAC:47`) runs once per game frame. In play it calls
+`DENORM` (123), which builds each object group into its own **sub-buffer** in vector RAM — cursor,
+shots, invaders, explosions, nymphs, info (scores and text), the well, enemy lines, stars — each
+**double-buffered** (A/B). `SBCLOG` (198) points `VGLIST` at the idle half, the group's routine writes
+AVG instructions there, and `SBCSWI` appends an `RTSL` and flips a `JMPL` switch word so the next pass
+of the AVG sees the new half. A master `JSRL` list at the top of vector RAM calls every group. Pictures
+are **AVG subroutines in the vector ROM** (`ALVROM`), reached with `JSRL` after a `SCAL` (binary and
+linear scale) and a `STAT` (colour, intensity). Much of the building is `STA NY,VGLIST` straight into
+the buffer, not calls to `ALVGUT` — which is why the seam has to be the list itself (plan, D2).
+**The well is only rebuilt when it moves** (`DSPWEL`, `ROTDIS`): a static well costs nothing per frame
+on the arcade.
 
-### What is reachable, and what is not
+**The well geometry.** `TABLES-WELL COORDINATES(WORLD)` (`ALDIS2.MAC:1231`, `NEWLIX` at 1237): 16 wells
+as 8-bit world X/Z tables per shape (circle, square, cross, …), built into screen points by `BLDWEL`
+(2574) through `WORSCR`. `tempest_orig/notebooks/Render Wells.ipynb` and `well_graphs.py` already render
+them on the host.
 
-**Reachable.**  Block `$C0` holds the bitmap, tile, sprite and **line-engine** registers, and `F$MapBlk`
-maps device pages — a confirmed capability this project already relies on.  So a user process can write
-`$C0+$1080`-`$1087` and drive the line engine itself.
+**The Math Box.** Only `ALDIS2.MAC` touches it in the game (49 references; `ALTES2` has the other 20).
+Of those, the multiply and window code at 2047-2207 sits inside **`.IF NE,0`** — assembled out. What
+runs is `INIMAT` (2368, zero the registers), **`CASCAL`** (1444, an object's scale from its depth) and
+**`WORSCR`** (2208, world to screen, two divides per point). Section 6.2 has what they compute.
 
-**Not reachable.**  `$FFC0`-`$FFCF` — the master control register, the layer control, the border, and
-**`$FFCA`, the line engine's real enable** — lives in `$FD00`-`$FFFF`, which is in *no* Level 2
-process's address space.  That is the memory map, not a policy.  So "turn the bitmap engine on", "which
-layer shows which bitmap" and "enable line drawing" remain driver calls whatever else is decided.
+**The spinner read.** In the IRQ, `ALHAR2.MAC:63-78`: kick `POTGO`, read the low 4 bits of POKEY 1's
+`ALLPOT` (the encoder's counter), subtract the previous reading, sign-extend the 4-bit difference to
+-8..+7, and add it to `TBHD` (`ALCOMN.MAC:479`). `MOVCUR` (`ALWELG.MAC:899-922`) takes `TBHD` once per
+game frame, **clamps it to ±31**, zeroes it, and moves the cursor. The attract-mode "press start" check
+(`ALEXEC.MAC:181`) and the skill-select and initials screens (`ALSCO2`) read it too.
 
-### `PushBuf`/`PullBuf` will **not** carry direct writes, and that is deliberate
+**The POKEY writes.** `MODSND` (`ALSOUN.MAC:270`), called from the IRQ at 246 Hz, is the only sound
+output: `AUDF`/`AUDC` for 8 channels and `AUDCTL`. Everything else touching POKEY is input (`POTGO`,
+`ALLPOT`, `ALLPO2` in the IRQ), randomness (`RANDOM`/`RANDO2`: 15 reads in `ALWELG`, 2 in `ALDIS2`), the two anti-tamper checks of
+section 2.4, or self-test.
 
-**Corrected 2026-09-20** — the first version of this section overstated it.  `PushBuf` *does* read back
-Vicky **memory**: CLUTs 0-3 and font bank 0 (`TermSaveCLUT` / `TermSaveFont0`, both `equ 1` and both
-confirmed on hardware), plus the text screen and colour planes.  A program poking CLUT entries directly
-**would** survive a switch.  What it does not capture is the **control registers** — the bitmap
-registers, the tile registers and `$FFC0-$FFCF`.  That capture was removed because on real hardware it
-was actively harmful — `grfdrv256.asm`'s own comment:
+### 2.2 The frame, and why it is not 60 Hz
 
-> a background image loaded on `/vt1` displayed correctly, survived being switched away from, and came
-> back as pure static — `PushBuf` had overwritten `V.BM2Blk` with whatever reading `$3011` produced and
-> `PullBuf` pointed the display at it.  **MAME models the whole `$C0` page as plain RAM, so the round
-> trip is perfect there and the failure never appears.**
+```
+MAINLN (ALEXEC:45)   loop: wait until FRTIMR >= 9, FRTIMR = 0
+                           EXSTAT   the state routine (ROUTAD: new game, play, drop, end wave, ...)
+                           NONSTA   credits, test switch, options
+                           DISPLAY  rebuild the changed sub-buffers
+IRQ (ALHAR2:38)      246.1 Hz: watchdog, spinner -> TBHD, debounce switches, lamps,
+                     coins, MODSND (sound), FRTIMR++, clocks, restart the VG if it halted
+```
 
-So for the control registers the switch path is **mirror → hardware, never back**: direct writes to them
-are invisible to it and are overwritten from the driver's mirror on the way back in.  The same source
-anticipates the question outright: *"A program that poked `$C0+$1000` behind the driver's back would no
-longer have its bitmap carried per terminal."*
+The AVG meanwhile redraws vector RAM **continuously and independently**; the game only replaces
+sub-buffers. So on the arcade the picture refreshes far faster than it changes, and the game's own clock
+is the 9-IRQ frame: **36.6 ms, 27.3 Hz**, stretched whenever a frame's work overruns it. On the F256 the
+bitmap is only as new as the last frame drawn into it, so "refresh" and "update" become the same thing,
+at the game's rate.
 
-**But that is a fixable state of affairs, not a hardware limit** — see the parked item in
-`docs/status.md`.  The bitmap registers read back fine; the **read map is the write map reversed**, and
-the old capture stored them in write order, which is what produced the static.  With a byte swap the
-capture could work, and then direct writes *would* be carried per terminal.  Only the **tile** registers
-are genuinely write-only (`assign DataOut_Tile_MAP_o = 8'h33;`).  Untested, and deliberately not
-changed.
+### 2.3 RAM
 
-### None of this applies to the line engine anyway
+`ALCOMN` lays out **2 KB**: zero page from `$00` (`ALCOMN.MAC:391`), page 1 from `$100` (with the 6502
+stack at the top — the IRQ resets if S drops below `$D0`), and `$200`-`$7FF` for the object arrays.
+**Zero page is full**: `ALEARO` puts two bytes at `$BD` and `ALSOUN` puts `SINDEX` at `$BF` and four
+16-byte channel arrays after it, which reach `$FF`. Plus 4 KB of vector RAM and 16 bytes of colour RAM
+(`COLRAM`, `ALCOMN.MAC:427`, copied to `COLPORT` at `ALDIS2.MAC:2356`).
 
-Worth saying plainly, because it is the case Tempest actually cares about: **the line engine holds no
-state that needs carrying across a terminal switch.**  Every line is self-contained — write the
-endpoints, raise GO, poll, lower GO — and queued FIFO pixels carry **absolute 24-bit addresses baked in
-at enqueue**, so they land correctly whatever happens to the registers afterwards.  The only
-per-terminal state is `$FFCA` bit 0, which is already in `V.BordBack` and already restored by
-`PullCore`.
+### 2.4 Anti-tamper code, which a port must neutralise
 
-So the push/pull objection above, which is real for bitmap addressing and configuration, **does not
-bear on driving the line engine directly**.  What remains is the liveness race below, plus a very narrow
-window in which a switch landing inside a 3.2 µs Bresenham walk could split one line across two base
-addresses.
+Tempest checks itself, and punishes a failed check. Found by name (`ZAT*`, `ZQ*`, `ZPO*`) and by the
+`QT3`-`QT6` flags; **not proven to be the complete list**:
 
-### Pausing on `S$WinBg` does not close the gap
+- `ZATVG2` (`ALDIS2.MAC:66`) checksums the copyright vectors into `QT3`; `ZATVG1` (157) into `QT6`.
+- `ZQVAVG` (`ALWELG.MAC:3082`) acts on `QT3`/`QT6`: over 170,000 points it `INC`s a zero-page byte
+  chosen by the score. **This is the Rev 1 forty-credit bug**: Rev 1's `ZATVG2` compared against `$2A`
+  instead of `$29`, so the check failed on genuine boards.
+- `ZPONTS` (`ALSCO2.MAC:876`) reads both POKEYs' `RANDOM` twice and expects the nibbles to match —
+  **a check for real POKEY hardware** — into `QT5`, acted on by `ZQPONS` (`ALDIS2.MAC:2968`).
+- `ZPOKST` (`ALSOUN.MAC:352`, inside `INISOU`) stops the POKEYs and checks that `RANDOM` keeps changing,
+  into `QT4`, acted on by `ZQPOKS` (`ALDIS2.MAC:961`). A software LFSR stepped per read would pass it;
+  `ZPONTS`'s nibble test it would not.
+- `ZATC4V` (`ALSCO2.MAC:105`), the `ZATC3`/`ZATC4` ranges, and the `ZATLIS` sum (`ALSCO2.MAC:983`)
+  verify the copyright message and the calls to it.
 
-Two independent reasons:
+Neutralise them by making each check pass, not by deleting the flags — the guide's stubbing rule
+(section 1) applies: grep every consumer first.
 
-- **Ordering.**  The switch happens inside the driver at AltISR time.  `PushBuf` *and* `PullBuf` both
-  run before the program is ever scheduled to see the signal.  A program can restore state on the way
-  **in**; it can never save it on the way **out**.
-- **No atomic "am I live?".**  A user process cannot test its liveness and write a register without a
-  window between the two.  Check, get preempted, a switch happens, write — and the *foreground*
-  terminal's bitmap now points at your memory, and stays wrong until its next `PullBuf`, i.e. the next
-  switch.  Switches are human-initiated so this is rare, but it is silent and persistent when it lands.
+## 3. Pacing
 
-**What would actually work** is the program keeping its own authoritative copy and reprogramming
-everything on `S$WinFg`, accepting a flash while `PullBuf` paints the stale mirror first.  That is
-exactly `SS.SprReg`'s design with the program doing the restore — and this project **deleted `SS.SprSet`
-for precisely "a second writer the driver could not reproduce on a switch"**
-(`docs/sprite-registration-plan.md`).  Reintroducing that shape is a decision to make with open eyes,
-not a shortcut.
+The arcade's rule is "at least 9 IRQs per game frame". The F256's clock is the 60 Hz start-of-frame
+tick. 9 IRQs are 2.195 ticks. Section 3 of the plan (decision D7) keeps the arcade's rule by running a
+**virtual 246 Hz IRQ** counter, advanced by 246.1/60 per tick, and taking a game frame whenever 9 have
+accumulated: game frames then take 2 or 3 ticks. The IRQ's other jobs — `MODSND` and the clocks — run
+once per virtual IRQ, so sound envelopes and timers keep the arcade's time base.
 
-### The honest arithmetic — and it is not the transport
+## 4. The display
 
-The tempting version of this argument is "direct writes replace a 474 µs call".  **That is wrong once
-the call is batched**, and `SS.BmLine` is batched.  The real comparison, per frame:
+### 4.1 The seam is the display list
 
-| | transport | per record | interrupts |
-|---|---|---|---|
-| `SS.BmLine` batch | 474 µs, **once** | ~200-250 cycles ≈ **25-30 µs** at 8 MHz | **masked throughout** |
-| direct from the program | none | the same instructions, so the same ~25-30 µs | enabled |
+The AVG's instruction set is small (`VGMC.MAC`; MAME `devices/video/avgdvg.cpp`): `VCTR` (relative
+move, intensity 0-7 in the long form), `SVEC` (short vector), `CNTR`, `STAT` (colour or intensity),
+`SCAL` (binary scale 0-7, linear scale 0-255), `JSRL`/`RTSL` (four levels), `JMPL`, `HALT`. Keep
+Atari's list-building code and replace the AVG with a **6809 interpreter** that walks vector RAM from
+the master list, applies scale, colour and intensity, clips, and emits `SS.BmLine` records. Blank moves
+(intensity 0) cost nothing but arithmetic.
 
-The per-record cost is the same work either way — the same seven register writes, the same `COMPLETE`
-poll.  So direct access saves the **474 µs once per batch**, about 2.8% of a frame, plus another 474 µs
-for each extra batch the FIFO pacing forces.  Useful, not transformative.
+**This is also the instrument.** The same interpreter written in Python renders a vector-RAM snapshot to
+a PNG and counts its lines and pixels, and vector RAM can be captured from **stock MAME 0.276**, which is
+installed and verifies the `tempest` set straight from `tempest_orig/notebooks/roms/tempest` (checked
+2026-09-22), with a Lua `-autoboot_script` — MAME unmodified. That gives the line and pixel volume of
+real frames before any hardware run, and a picture to compare every later frame against.
 
-**The real difference is interrupt latency.**  `vtio`'s `CallGrfDrvGo` does `orcc #IntMasks` before the
-flip and grfdrv runs masked for the whole call — the source notes "a driver cannot be preempted
-mid-call".  So a batch of 100 lines holds interrupts off for **~2.5-3 ms**, and `SS.BmLine`'s maximum of
-255 records would hold them off for **~7 ms, nearly half a frame**.  For a game pumping VS1053 samples
-and counting 60 Hz ticks that is the number that matters, and it is an argument the transport figure
-hides completely.
+### 4.2 Lines and erase, per frame
 
-> **Per-record figures above are counted from the instruction stream, not measured.**  `ssbench` should
-> measure `SS.BmLine` at several batch sizes early, because the slope matters more than the intercept —
-> and the slope is what decides this whole question.
+- **Draw:** `SS.BmLine` into the bitmap no layer shows. Each record is an absolute line; the FIFO drains
+  only on **odd visible lines** and only on bus cycles the CPU leaves free (`defs/wildbits.d`, the `LD_*`
+  notes). The driver stops a batch when fewer than 320 entries are free and returns the count drawn.
+- **Erase:** `SS.BmClear` on the other bitmap, 16-bit, one call.
+- **Show:** swap with one `SS.Layer`.
 
-### If it is taken, what the driver needs
+What nobody has measured, and what the plan's first hardware stage measures:
 
-Not a free-for-all: a **"give me the line engine" call**, so the driver knows to stop using it and can
-refuse `SS.BmLine` while the program holds it, and so `$FFCA` gets enabled once by the only code that
-can reach it.  Handing it back on exit, and on `GF.TermGone`, is the same lifetime problem the tile and
-sprite assets already have (`docs/next-session-prompt.md` item c) — which is an argument for settling
-that rule first.
+| Number | Why it decides something | Estimate, unchecked |
+|---|---|---|
+| Pixels drained per frame | Caps the picture | Order 10⁵ (`bmline-bmclear-plan.md` §3, from the RTL) |
+| `SS.BmLine` cost per record | 400 lines × this is a large slice of a 36.6 ms frame | 25-30 µs, counted from the instruction stream |
+| Lines and pixels in a real Tempest frame | The load | None yet: the MAME capture gives it |
+| `SS.BmClear` wall clock, by the line it is called at | 0.4 ms or a whole frame | Driver comment: up to 15 ms waiting for line 0 on the old core |
+| Whether `SS.Layer` takes effect at once or at the next frame | Tearing | None |
 
-### Recommendation
+### 4.3 Colour and intensity fit one CLUT exactly
 
-**Measure before deciding, and do not design for this yet.**  Build Tempest on `SS.BmLine` as it
-stands; harness job one already measures pixels drained per frame, and it should measure the batch slope
-at the same time.  Reach for direct access only if the masked-interrupt window turns out to be what
-breaks the frame — and if it does, the first thing to try is a **smaller batch**, which costs one extra
-474 µs call and fixes the latency without giving up the ownership rule at all.
+Tempest's colour RAM is 16 entries of 4 bits, inverted — green, blue and a two-level red
+(`avg_tempest_device::handler_7`) — and the beam has 16 intensity levels. **`colour × 16 + intensity`
+is a 256-entry CLUT**, so each record's colour byte carries both and the line engine needs nothing
+else. Colour-RAM changes (the per-level well colours, the logo rainbow) become CLUT rewrites at the
+frame commit, 16 entries per changed colour, in one `SS.ClutWrite`. Index 0 is colour 0 at intensity 0:
+black, and transparent, which is what a blank bitmap should be.
 
-## 3. The spinner
+This is the cheap half of "appearance-faithful". Glow and beam width are not available and are not
+proposed.
 
-A rotary encoder read as relative motion, plus fire, superzapper and start buttons. **Nothing in this
-project has read a rotary control yet**, so this is the second bring-up harness.
+### 4.4 Resolution, rotation, clipping
 
-- Establish what the intended physical control actually is — a real spinner, a mouse, or a joystick
-  pretending to be one — and what the F256 offers for it: the joystick headers and the VIA lines behind
-  them, NES/SNES at `$FF80`, the mouse interface at `$FEA0`. A mouse's X delta is the closest existing
-  thing.
-- **The platform contract is different from Joust's.** Joust needed a truthful *level* ("is this key down
-  now?") because the game builds its own edge detector. Tempest needs an accumulated *delta* per frame,
-  where a dropped count is a visible glitch and a missed sample is lost motion — not a stuck control.
-  Sample it every frame in the frame loop, accumulate, and hand the game the count.
-- A new `SS.*` call is warranted only if a driver has to do the counting (an interrupt-rate quadrature
-  decode). If a 60 Hz read from the application is enough, do that and add no driver surface.
-- Check direction, resolution (counts per revolution) and wrap behaviour in the harness, and decide the
-  sensitivity mapping against the real machine — this is the control the whole game feels like.
+MAME's visible area is 580 × 570 AVG units, rotated 270° (`tempest.cpp:924`; the rotation swaps the
+axes, `avgdvg.cpp` `handler_7`). Onto 240 rows that is about **2.4 units a pixel**, a ~236 × 240 square
+centred in the 320-pixel width. The far rim of a well and a distant enemy become a few pixels; that is
+the cost of 240 rows. **Clipping is required**: the line engine silently drops a line with an endpoint
+off the bitmap, and the drop sequence at the end of a wave flies the well past every edge of the screen.
 
-## 4. Sound and maths
+### 4.5 Driving the line engine directly (from the first version, corrected)
 
-**Sound: two POKEYs, which the F256 does not have.** The options are guide section 8's, and the choice is
-between them:
+The option was a program on the live terminal writing `$C0:$1080-$1087` itself instead of calling
+`SS.BmLine`. **The arithmetic still says no, now more firmly.** The per-record work is the same seven
+writes and a poll either way; direct access saves one 474 µs call per batch, and nothing else. The first
+version's stronger argument — the batch runs with interrupts masked — was **wrong** (see the table at the
+top). The remaining objections stand: the control registers are carried per terminal from the driver's
+mirror, never read back, so direct writes are invisible to a terminal switch; a program cannot test "am
+I live?" and write atomically; and a program writing hardware the driver also writes is the second-writer
+shape this project removed from the sprite calls. If the batch count ever matters, **fewer calls** —
+the `WAIT` flag in the plan's `SS.BmLine` proposal — is the answer, and it keeps one owner.
 
-- **Sampled PCM through the VS1053**, exactly as Joust does — the whole of section 8 then applies
-  unchanged, including the metered feed and the per-machine codec input. Samples captured from MAME's
-  emulation with a host tool, MAME unmodified.
-- **Synthesised on the PSGs, SIDs, OPL3 or the SAM2695** in page `$C4` — new work and new risk, but no
-  absolute-address exception and a far smaller per-frame cost. Tempest's continuous tones and the
-  zapper sweep suit a synth better than they suit short samples, and a per-sound **loop flag** is the
-  minimum either way (Joust needed one for its transporter).
+One statement from the first version is **doubtful and unchecked**: that `$FFC0-$FFCF` "lives in
+`$FD00-$FFFF`, which is in no Level 2 process's address space". Joust writes the VS1053 at `$FF50`
+directly from a user process, and `fm` writes the coprocessor at `$FEE0`; both are in that page. Whether
+`$FFC0`-`$FFCF` is reachable is therefore a policy question (the driver owns it), not an addressing one.
+Nothing in this plan depends on the answer.
 
-**Settle the chip before the output stage is built.** If this port ever uses the VS1053 as a 3D graphics
-processor (guide section 8), it is not available for audio at all.
+## 5. The spinner
 
-**Maths: Tempest's Math Box is a hardware multiplier/divider**, and the F256's integer math coprocessor
-(guide section 7a, `$FEE0-$FEFF`) is the direct analogue: 16×16 unsigned multiply, 16/16 divide with
-remainder, 32-bit add. If the projection maths turns out to be the frame's second cost after the lines,
-that is where to look before hand-writing 6809 multiply routines — subject to 7a's two cautions
-(it needs its own approved absolute-address exception, and nothing arbitrates the unit between processes).
+**The arcade:** an optical encoder counted in hardware into a 4-bit up/down counter on POKEY 1's pot
+port; **72 counts a turn** (MAME `PORT_FULL_TURN_COUNT(72)`). The IRQ turns it into a delta at 246 Hz;
+the game consumes it once a game frame, clamped to ±31. So the platform contract is exactly "signed
+counts since the last frame", and the game already clamps.
 
-## 5. 6502 to 6809
+**On the F256 there is no rotary input and no call that reads one.** What exists:
 
-Joust's conversion was a transcription: same CPU, so arcade labels, order and comments survived intact and
-every bug hunt was "compare against the listing". Tempest is a translation, which weakens that safety net
-exactly where it was most useful. Compensations:
+- **The PS/2 mouse.** `mousedrv_ps2` (loaded by the L2 recipe) takes 3-byte packets at 40 samples a
+  second, 4 counts/mm, and **adds each delta to an absolute pointer clamped to 0-640 and 0-480**, then
+  sets `MS_MEN` = 1 so the pointer shows (`level1/wildbits/modules/mousedrv_ps2.asm`, `IRQMSvc`). `GetStat
+  SS.Mouse` returns that absolute position. At an edge the deltas are lost, and the pointer would appear
+  over the game whenever the control moved. **So a mouse — or any spinner that presents itself as a
+  PS/2 mouse — needs a delta call.** The plan proposes `SS.MsDelta`.
+- **A raw arcade spinner** (quadrature) on a joystick header would need an interrupt-rate decoder in a
+  driver: at 60 Hz a quadrature signal aliases after one step per sample. Only worth building if that is
+  the hardware.
+- **Keys or a stick**, with the program ramping the rate while held. Needs no new call, and is the
+  fallback whatever else is chosen.
 
-- Keep the original's labels, routine order and comments anyway, even where the instructions change
-  completely. The docs cite line numbers into the original listing; that only works if the structure
-  matches.
-- Keep a **per-routine checklist** against the original listing — the equivalent of Joust's
-  `tools/utilcheck.py`, which compared a harness's output against a model of the arcade routines and
-  caught real errors before any of it ran on hardware.
-- 6502 idioms that do not survive: zero-page as a general register file (the 6809's DP is one page and is
-  already spoken for by the data-area convention — guide section 5), self-modifying code, and
-  page-boundary-sensitive indexing. Each needs a decided form, once, written down before the first file.
+What hardware the user has or will get is the question that decides this (plan, D4).
 
-## 6. Suggested order
+## 6. Sound and maths
 
-This is guide section 14's **graphics first** principle applied to a game with no sprite sheets: what
-Joust proved with an asset viewer, Tempest proves with the line engine and a captured display list on
-screen. Same purpose — every primitive confirmed against a photograph before any game code exists, and an
-instrument in hand for every bug after that.
+### 6.1 Sound: one interpreter, eight channels, a register image
 
-1. **Line-draw harness** on hardware: one line, a box, a fan, a full frame's worth. Lines per frame; the
-   go/busy protocol; what happens when the FIFO is overrun; erase strategy. *Everything else waits on
-   this.*
-1a. **A captured display list on screen**, replayed from a file by a standalone viewer — the first real
-   picture, and the proof that the host-side capture and the geometry are right before any of the game
-   runs.
-2. **Spinner harness**: read it, print counts, confirm direction and resolution at 60 Hz.
-3. **The two interface documents** (display list → line engine; sound events → sequencer) written from the
-   original listing, with the numbers from steps 1-2 in them.
-4. **Program skeleton**: data area, asset blocks, display set-up, frame loop, `SS.WSig` pause, terminal
-   lockdown, clean exit — ported from `src/platform.a`, not rewritten.
-5. **Graphics section** against a harness that replays a captured display list.
-6. **Sound section** against a harness that fires every sound.
-7. **Game logic**, in parts, each part confirmed on hardware before the next one starts.
+`ALSOUN` is small and regular. Each of 13 sounds (`PNTRS`, `ALSOUN.MAC:87`: cursor move, enemy
+explosion, player fire, pulsation, bonus, player dies, thrust in tube, thrust in space, enemy shot, enemy
+line destruction, slam, 3-second warning, pulsar off) names up to 8 channel sequences, an `F` (frequency,
+`AUDF`) and an `A` (distortion and volume, `AUDC`) per POKEY channel. A sequence is 4-byte steps: start
+value, IRQs per change, change, number of changes; `0,0` ends and `x,0` loops. `MODSND` steps every
+active channel once per IRQ and writes the result to the POKEYs.
 
-## 7. What carries over from Joust untouched
+So **the seam is a POKEY register image**: 8 × (`AUDF`, `AUDC`) plus `AUDCTL`, rewritten by `MODSND` at
+the virtual IRQ rate. Keep `ALSOUN` verbatim, write the image instead of the chips, and let an output
+stage turn the image into sound once per frame. The output stage is the decision (plan, D5); every
+option consumes the same image, so it stays reversible. The `AUDC` values Tempest uses mix pure tones
+(`$Ax`) with polynomial-noise forms (`$0x`, `$2x`, `$6x`, `$8x`), so whatever plays them needs noise
+at a controllable rate as well as square waves.
 
-- Guide sections 3-5 in their entirety: logical space and the module budget, `F$AllRAM` assets, the PIC
-  rules, the DP/`DBASE` data-area convention, the static checker.
-- Guide section 10 as *code*: pause on `SS.WSig`, terminal lockdown, clean exit on every path are built
-  and proven in `src/platform.a`.
-- Guide section 12's frame loop, and the per-frame request pool if the display list is built the same way.
-- Guide section 13 wholesale — the working method and every tooling pothole.
-- The settings-and-high-scores-as-a-file model, with an operator program editing the same file
-  (`docs/joustadm.md` is the worked example).
+The first version's warning still holds: if the VS1053 is ever used as a geometry processor it is not
+available for sound. An output stage on the SIDs or PSGs keeps it free.
+
+### 6.2 Maths: the Math Box is one divide
+
+Read against the Math Box documentation (`MBUDOC.DOC`, the register table) and MAME's microcode model
+(`mathbox.cpp`, case `0x14`), then checked on the host by running MAME's algorithm against the formula
+over every input Tempest can produce:
+
+- **`WORSCR`** (world to screen), twice per point: `SZXD` with N = 15 and a dividend of `Δz·256` returns
+  **`floor(|Δz| × 128 / Δy)`**, exactly, for all Δz < 256 and Δy < 1024 (checked exhaustively). The sign
+  is applied by the 6502 afterwards, then the screen centre is added.
+- **`CASCAL`** (an object's scale from its depth), once per object: `SZXD` with N = 24 returns the low
+  16 bits of **`floor(YDEUNI × 65536 / Δy)`** — a 16-bit fraction.
+
+The F256's integer coprocessor at `$FEE0` (16/16 unsigned divide, quotient and remainder; guide section
+7a) does `WORSCR`'s divide in one step and `CASCAL`'s in two. A 6809 software divide is 300-400 cycles.
+Using the coprocessor needs an **approved absolute-address exception** like the VS1053's, and it is
+shared: **`fm` already writes `$FEE0`** (`level2/wildbits/cmds/fm.asm:3372`), so two programs on two
+terminals can collide (plan, D8).
+
+## 7. 6502 to 6809
+
+Joust was a transcription; this is a translation, and the safety net of "compare against the listing"
+has to be rebuilt. What the source says about the job:
+
+- **~20 KB of 6502** in the ROM, of which self-test is 1.5 KB. How much 6809 that becomes is the
+  number to get from a pilot, not to guess; the budget is 40,192 bytes of module (guide section 3).
+- **HLL65's structured macros are everywhere** (`IFEQ`/`IFCS`/`ELSE`/`ENDIF`, `BEGIN`/`CSEND`/`MIEND`/
+  `EQEND`/…) and translate mechanically.
+- **MAC65 syntax** is its own: `LDA I,0F` (immediate), `LDA X,TAB` (absolute,X), `STA NY,VGLIST`
+  ((zp),Y), `.BYTE`, radix 16 by default with a trailing `.` for decimal. A translator reads it once.
+- **Zero page is full** (section 2.3). On the 6809 it maps naturally onto DP, page for page — but then
+  DP has no room for `DBASE` or for pseudo-registers, and something must move to page 1. The 6502 stack
+  area at the top of page 1 (`$1D0`-`$1FF`) is free on the 6809.
+- **The 6502 index registers are the hard part.** `LDA TAB,X` with an 8-bit X over a table in the data
+  area has no one-instruction 6809 form under the PIC rules: `B,X` offsets are **signed**, and the table
+  is data-area-relative. The register model — which 6809 register holds 6502 X and Y, and the idiom for
+  each addressing mode — has to be decided once, on a pilot, before the first file (plan, D6).
+- **Self-modifying code, page-crossing tricks, `JMP (ind)`, the stack-based dispatch** (`EXSTAT` pushes
+  an address and `RTS`es) each need a written form.
+- **The original binary is a test oracle.** The ROMs rebuild byte-identical from this source, so a host
+  6502 emulator running Atari's own routine is the reference for the translated one: same inputs, same
+  outputs. That replaces Joust's "compare against the listing" with something stronger.
+
+## 8. Which revision
+
+**Rev 2A(alt), which is MAME's `tempest` — "rev 3", the final release.** `ALEXEC.LDA` is its linked
+binary, and mwenge's notebooks rebuild it byte-identical from these sources and run it in MAME with no
+checksum errors (`notebooks/Build Tempest Sources for Version 2A(Alt).ipynb`, `Reconstruct ROMs from
+Object FIles in the Tempest Source Dump.ipynb`). Rev 1 is `TEMPST.LDA`, MAME's `tempest1`.
+
+The differences (`notebooks/Differences Between Rev1 and Rev2A(Alt).ipynb`) are three: the anti-tamper
+constant in `ZATVG2` (`$2A` → `$29`, **the forty-credit bug**), a `JMP INFO` → `JMP HACKER` in `ALSCO2`
+that skips part of the credits display, and self-test changes plus ROM checksums. None of them touches
+gameplay, and the port drops the anti-tamper code and the self-test anyway — so the choice is about
+which reference to compare against. Rev 3 is the version on the ROM set MAME treats as the parent, the
+version most cabinets run, and the one the installed MAME verifies from this tree. There is no reason to
+port a version with a known bug in order to remove it.
+
+## 9. What carries over from Joust untouched
+
+- Guide sections 3-5: logical space and the module budget, `F$AllRAM` assets, the PIC rules, the
+  DP/`DBASE` data-area convention, the static checker (`tools/piccheck.py`).
+- Guide section 10 as *code*: `SS.WSig` pause, terminal lockdown, clean exit on every path, in Joust's
+  `src/platform.a`.
+- The settings-and-high-scores file, with an operator program (`docs/joustadm.md`).
+- `SS.BmClear` exactly as Joust calls it (`src/gfx.a BmClrDma`), and `SS.ClutWrite` for colour changes.
+- Guide section 13: the working method and every tooling pothole.
+
+## 10. Unchecked, in one place
+
+- Everything in section 4.2's table.
+- Whether the fixed core's DMA still waits for the vertical-blanking window.
+- Whether `SS.Layer` flips at once or at the next frame.
+- The Jr2, for `SS.BmLine` and `SS.BmClear` both.
+- That section 2.4 lists every anti-tamper check.
+- The screen mapping in section 4.4 (derived from MAME's visible area, not from captured frames).
+- How big the 6809 translation is.
+- Whether the soft SIDs honour a sustain-level change mid-note (matters for D5).
+- `$FFC0-$FFCF` reachability (section 4.5).
