@@ -29,59 +29,59 @@ GL.LEN              equ       15
 
 ********************************************************************
 * TxCommit - draw the changes since the last frame's text
+*
+*   TxMatch first flags which entries changed, old (TXFO) and new
+*   (TXFN), a bit an entry.  It matches the lists in order with a short
+*   look-ahead, not index for index: the high score screen's top line
+*   alternates between an 11- and an 8-character message, and by index
+*   every entry after it then differed, so the whole table was erased
+*   and redrawn every two seconds (0.6 s of it, on the K2).
 ********************************************************************
-TxCommit            clr       TXERS,u             nothing erased yet (ROWMSK is cleared at the first)
+TxCommit            lbsr      TxMatch             Z = 1: nothing changed (Draw left room for it)
+                    lbeq      tcx                 (then the lists are the same: no copy either)
+                    ldd       #TXMUS
+                    ldx       #GLYUS+11*ROWUS     room for the biggest glyph?
+                    lbsr      Spend
+                    clr       TXERS,u             nothing erased yet (ROWMSK is cleared at the first)
 * pass 1: erase what changed
                     clr       TXCLR,u             erasing
-                    ldx       VWIN,u
-                    leax      TXLIST,x            X = the new list
                     leay      TXOLD,u             Y = the old
                     ldd       #0
 tc1                 cmpd      TXCNT,u             every old entry
-                    bhs       tc3
+                    bhs       tc3a
                     pshs      d
-                    cmpd      AVGPG+AV.TCNT,u
-                    bhs       tc2                 no new entry i: erase
-                    lbsr      TxSame
+                    leax      TXFO,u
+                    lbsr      FlagAt
+                    anda      ,x
                     beq       tc2a
-tc2                 tst       TXERS,u
+                    tst       TXERS,u
                     bne       tc2b
                     inc       TXERS,u             the first erase: no rows marked yet
-                    pshs      x
                     leax      ROWMSK,u
                     ldb       #30
 tc0                 clr       ,x+
                     decb
                     bne       tc0
-                    puls      x
-tc2b                pshs      x
-                    tfr       y,x
+tc2b                tfr       y,x
                     lbsr      TxDraw              the old entry in 0
                     lbsr      TxSpnd
-                    puls      x
-tc2a                leax      6,x
-                    leay      6,y
+tc2a                leay      6,y
                     puls      d
                     addd      #1
                     bra       tc1
-* nothing erased and as many entries: the list is the same, nothing to do
-tc3                 tst       TXERS,u
-                    bne       tc3a
-                    ldd       TXCNT,u
-                    cmpd      AVGPG+AV.TCNT,u
-                    beq       tcx
 * pass 2: draw what changed, and what an erase may have touched
 tc3a                ldx       VWIN,u
                     leax      TXLIST,x
-                    leay      TXOLD,u
                     ldd       #0
 tc4                 cmpd      AVGPG+AV.TCNT,u     every new entry
                     bhs       tc7
                     pshs      d
-                    cmpd      TXCNT,u
-                    bhs       tc5                 no old entry i: draw
-                    lbsr      TxSame
-                    bne       tc5
+                    pshs      x                   (on top: puls x takes it back alone)
+                    leax      TXFN,u
+                    lbsr      FlagAt
+                    anda      ,x
+                    puls      x
+                    bne       tc5                 changed: draw
                     tst       TXERS,u             unchanged: nothing erased, nothing to redraw
                     beq       tc6
                     lbsr      TxMarked            on a marked row?
@@ -91,7 +91,6 @@ tc5                 lda       1,x                 its colour
                     lbsr      TxDraw
                     lbsr      TxSpnd
 tc6                 leax      6,x
-                    leay      6,y
                     puls      d
                     addd      #1
                     bra       tc4
@@ -116,6 +115,168 @@ tc9                 lda       ,x+
                     bne       tc9
                     puls      u
 tcx                 rts
+
+********************************************************************
+* TxMatch - TXFO and TXFN: a bit set for each old and new entry that
+*   changed.  Walk both lists (TXI old, TXJ new): equal entries match;
+*   otherwise look up to TXLOOK entries ahead in the new list for the
+*   old one (the new ones before it were inserted) and in the old list
+*   for the new one (the old ones before it were removed), and take the
+*   nearer; neither: both changed.  What is left of either list at the
+*   end changed.  Z = 1 when nothing did.  U kept.
+********************************************************************
+TXLOOK              equ       8
+
+TxMatch             leax      TXFO,u              both flag arrays clear (TXFN follows TXFO)
+                    ldb       #64
+tqc                 clr       ,x+
+                    decb
+                    bne       tqc
+                    clr       TXANY,u
+                    ldd       #0
+                    std       TXI,u
+                    std       TXJ,u
+tq1                 ldd       TXI,u
+                    cmpd      TXCNT,u
+                    lbhs      tqrn                the old list done: the rest of the new changed
+                    ldd       TXJ,u
+                    cmpd      AVGPG+AV.TCNT,u
+                    lbhs      tqro                the new list done: the rest of the old changed
+                    ldd       TXI,u
+                    lbsr      OldAt               X = old[i]
+                    ldd       TXJ,u
+                    lbsr      NewAt               Y = new[j]
+                    lbsr      TxSame
+                    bne       tq2
+                    ldd       TXI,u               the same: both on
+                    addd      #1
+                    std       TXI,u
+                    ldd       TXJ,u
+                    addd      #1
+                    std       TXJ,u
+                    bra       tq1
+* old[i] ahead in the new list: k = 1.. while j + k < the new count
+tq2                 ldb       #1
+tq3                 cmpb      #TXLOOK
+                    bhi       tq5                 not found
+                    pshs      b
+                    clra
+                    addd      TXJ,u
+                    cmpd      AVGPG+AV.TCNT,u
+                    bhs       tq4                 past the end
+                    lbsr      NewAt               Y = new[j + k]
+                    lbsr      TxSame              (X is old[i] still)
+                    puls      b
+                    beq       tq6                 found at k
+                    incb
+                    bra       tq3
+tq4                 puls      b
+tq5                 ldb       #TXLOOK+1           k = none
+tq6                 stb       TXK,u
+* new[j] ahead in the old list: m = 1..
+                    ldd       TXJ,u
+                    lbsr      NewAt               Y = new[j]
+                    ldb       #1
+tq7                 cmpb      TXK,u               no nearer than k: not worth looking
+                    bhs       tq9
+                    pshs      b
+                    clra
+                    addd      TXI,u
+                    cmpd      TXCNT,u
+                    bhs       tq8
+                    lbsr      OldAt               X = old[i + m]
+                    lbsr      TxSame
+                    puls      b
+                    beq       tqrm                found at m < k: old i..i+m-1 were removed
+                    incb
+                    bra       tq7
+tq8                 puls      b
+tq9                 ldb       TXK,u
+                    cmpb      #TXLOOK
+                    bls       tqin                found at k: new j..j+k-1 were inserted
+* neither: old[i] and new[j] both changed
+                    ldd       TXI,u
+                    leax      TXFO,u
+                    lbsr      FlagSet
+                    addd      #1
+                    std       TXI,u
+                    ldd       TXJ,u
+                    leax      TXFN,u
+                    lbsr      FlagSet
+                    addd      #1
+                    std       TXJ,u
+                    lbra      tq1
+tqin                ldd       TXJ,u               B = k: flag k new entries
+                    leax      TXFN,u
+tqin1               lbsr      FlagSet
+                    addd      #1
+                    dec       TXK,u
+                    bne       tqin1
+                    std       TXJ,u
+                    lbra      tq1
+tqrm                stb       TXK,u               m old entries
+                    ldd       TXI,u
+                    leax      TXFO,u
+tqrm1               lbsr      FlagSet
+                    addd      #1
+                    dec       TXK,u
+                    bne       tqrm1
+                    std       TXI,u
+                    lbra      tq1
+tqro                ldd       TXI,u               the rest of the old
+                    leax      TXFO,u
+tqro1               cmpd      TXCNT,u
+                    bhs       tqx
+                    lbsr      FlagSet
+                    addd      #1
+                    bra       tqro1
+tqrn                ldd       TXJ,u               the rest of the new
+                    leax      TXFN,u
+tqrn1               cmpd      AVGPG+AV.TCNT,u
+                    bhs       tqx
+                    lbsr      FlagSet
+                    addd      #1
+                    bra       tqrn1
+tqx                 tst       TXANY,u
+                    rts
+
+* FlagSet - X = a flag array, D = an index (0-255): its bit set, TXANY too.  D, X kept.
+FlagSet             pshs      d,x
+                    bsr       FlagAt
+                    ora       ,x
+                    sta       ,x
+                    lda       #1
+                    sta       TXANY,u
+                    puls      d,x,pc
+
+* FlagAt - X = a flag array, D = an index (0-255): X = its byte, A = its bit.  B clobbered.
+FlagAt              pshs      b
+                    lsrb
+                    lsrb
+                    lsrb
+                    abx
+                    ldb       ,s+
+                    andb      #7
+                    lda       #1
+fa1                 tstb
+                    beq       fax
+                    lsla
+                    decb
+                    bra       fa1
+fax                 rts
+
+* OldAt - D = an index: X = TXOLD's entry.  NewAt - Y = the new list's.  D clobbered.
+OldAt               lda       #6
+                    mul
+                    leax      TXOLD,u
+                    leax      d,x
+                    rts
+NewAt               lda       #6
+                    mul
+                    ldy       VWIN,u
+                    leay      d,y
+                    leay      TXLIST,y
+                    rts
 
 * TxSpnd - X = an entry just drawn: its cost to the pass's budget (frame.a Spend),
 *   GLYUS and ROWUS a row.  All registers kept.

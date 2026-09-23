@@ -49,6 +49,7 @@ MINBUS              equ       MINREC*RECUS+CALLUS the smallest next batch
 FLIPUS              equ       1500                the flip and the CLUT, typically
 GLYUS               equ       1000                a glyph erased or drawn: this, and ROWUS a row (text.a);
 ROWUS               equ       60                  measured 370-1,470 us, a remap of the window included
+TXMUS               equ       1500                text.a TxMatch, the lists compared (148 entries: ~1.1 ms)
 
 MainLoop            ldx       #2                  wait for the next tick (X = 1 only gives up the time slice)
                     os9       F$Sleep
@@ -157,7 +158,7 @@ Draw                ldd       #0                  room for the first batch?
                     lbsr      Flip
                     lbsr      ClutCommit
                     ldd       #FLIPUS
-                    ldx       #GLYUS+11*ROWUS     room for the biggest glyph?
+                    ldx       #TXMUS+GLYUS+11*ROWUS room for the text's match and the biggest glyph?
                     bsr       Spend
                     lbra      TxCommit            which Spends a glyph at a time
 

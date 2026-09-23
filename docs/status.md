@@ -1063,6 +1063,24 @@ User: "let's create a 640 test branch and test 640 and see if it looks better." 
 - Unknown until the K2: the engine's speed on a 4-bit plane (each pixel a read-modify-write), and
   whether intensity 12 for everything looks right.
 
+**On the K2 (user, 2026-09-23): it draws, and the photographs show clean 640 lines** (the circle
+and the bow-tie wells, the claw, the text in front). **1,463 game frames, 6,472 passes in 108 s:
+13.5 game frames a second, no ticks lost** (6,480 ticks). Not comparable with the 320 run's 15.4:
+this one includes attract time with the high-score fault below. "Game play feels snappier", but the
+attract is slow and **the high score screen keeps clearing and redrawing**.
+
+**The high score screen (fixed, main too; untested on hardware).** Its text list's first entries
+are a line that alternates every ~2 s between an 11- and an 8-character message. `TxCommit`
+compared the lists index for index, so every entry after it differed: all 148 were erased and
+redrawn, 293 glyphs, ~38 ticks (0.6 s) of visible clearing each time. `TxMatch` (`text.a`) now
+walks both lists matching in order with an 8-entry look-ahead each way, flagging the changed
+entries a bit each (`TXFO`, `TXFN`); the passes then erase and draw only those (and what an erase
+touched, as before). In the model's attract: **20 glyphs and ~5.5 ticks a change instead of 293
+and 38; every frame's text bitmap checked right**. The match costs about 1.1 ms for 148 entries,
+charged as `TXMUS`. A list that has not changed is no longer copied. The high score screen's
+first appearance still draws its 148 glyphs, ~21 ticks; the logo's 13 moving texts still redraw
+every frame.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
