@@ -376,7 +376,7 @@ class Host(CPU6809):
                     bits = gl[4 + 2 * r] << 8 | gl[5 + 2 * r]
                     for c in range(gw):
                         if bits << c & 0x8000:
-                            x, y = 2 * col + gx + c, row + gy + r
+                            x, y = col + gx + c, row + gy + r      # col in 640ths
                             if 0 <= x < 2 * W and 0 <= y < H:
                                 o = y * W + x // 2
                                 want[o] = (want[o] & 0x0F | nib << 4) if x % 2 == 0 \

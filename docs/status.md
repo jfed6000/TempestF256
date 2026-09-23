@@ -1094,6 +1094,14 @@ the lines). The rows stay 240, so the small font is still 6 rows tall. `osrun.py
 text plane: play and attract, every frame right. `HIRES` = 0 now also needs main's `text.a` and
 `glyphs.a`.
 
+**Spacing (user: "the J is right up against the D").** The masks were fine (8 dots wide, 10.07
+advance) but a character's column was the beam rounded to 320 and then doubled: the 4.945-column
+advance can round to 4, i.e. 8 dots, exactly a glyph's width. With `HIRES`, `avg.a` now writes a
+text entry's column in 640ths, round(2x) from the beam's fraction (`AVTX64`; the host tests
+assemble without `HIRES` and keep checking the 320 form: `avgtest.py` play capture, 3,481 frames
+byte-exact). The top line's E, J, D: columns 333, 343, 353, 2-dot gaps. Play and attract checks
+right. The line records still double a 320 endpoint (to do the same for lines: the next step).
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

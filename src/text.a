@@ -21,8 +21,9 @@
 *   Branch hires640: the text bitmap is a 640x240 plane at 4 bits a dot
 *   (gfx.a BmHi, CLUT 1, the lines' 16 colours), so glyphs are drawn at
 *   640 with 1-dot strokes (glyphs.a from tools/glyphs.py --hires): an
-*   entry's column is doubled, and each dot is a nibble, the left one
-*   high.  HIRES = 0 needs main's text.a and glyphs.a back.
+*   entry's column is in 640ths (avg.a AVTX64: round(2x) from the beam's
+*   fraction; doubling the 320 column let characters touch), and each dot
+*   is a nibble, the left one high.  HIRES = 0 needs main's text.a and glyphs.a back.
 ********************************************************************
 
 TXLIST              equ       $1800               in window A (avg.a)
@@ -394,7 +395,8 @@ TxDraw              pshs      x,y
                     sta       TXNR,u              rows left
                     leay      GL.ROWS,y
                     sty       TXGLY,u             the next row's bits
-* the columns, in 640ths: first = column * 2 + x; skip the ones left of 0, cut the ones right of 639
+* the columns, in 640ths: first = column + x (avg.a writes 640ths, AVTX64); skip the ones left
+* of 0, cut the ones right of 639
                     lda       TXCLR,u             the colour in both nibbles' places
                     lsla
                     lsla
@@ -402,8 +404,6 @@ TxDraw              pshs      x,y
                     lsla
                     sta       TXCLH,u
                     ldd       2,x
-                    lslb
-                    rola
                     pshs      d
                     ldb       -GL.ROWS+GL.X,y
                     sex

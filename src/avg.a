@@ -23,6 +23,11 @@ TOP	equ	4
 BOTTOM	equ	8
 BMW	equ	320			the bitmap
 BMH	equ	240
+	ifdef	HIRES			(the module's frame.a; the host tests leave it out)
+AVTX64	equ	HIRES			text entries' columns in 640ths (branch hires640)
+	else
+AVTX64	equ	0
+	endc
 MAXJMP	equ	1024			control transfers before a list counts as a runaway
 MAXTXT	equ	256			text entries
 	ifndef	RBATCH
@@ -820,8 +825,22 @@ _GL1	addd	<AV.GTAB
 _GL2	ldb	8,x
 	orb	<AV.COLR
 	std	,u
+	ifne	AVTX64
+* the column in 640ths, round(2x): COL is x + 1/2 in 16.8, so floor((2 COL - 128) / 256)
+	ldd	<AV.COL+1
+	subd	#64
+	pshs	b
+	tfr	a,b			(TFR and LDA keep the borrow)
+	lda	<AV.COL
+	sbca	#0			A:B:,s = COL - 64
+	lsl	,s+
+	rolb
+	rola
+	std	2,u
+	else
 	ldd	<AV.COL			the rounded beam
 	std	2,u
+	endc
 	ldd	<AV.ROW
 	std	4,u
 	leau	6,u
