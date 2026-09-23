@@ -24,13 +24,16 @@ layer is FOR REVIEW (docs/status.md, "The platform layer"):
   - The IRQ is ALHAR2's own on a virtual 246.09375 Hz clock (525/128 of the tick, src/frame.a);
     RANDOM is a generator (src/hw.a) that xlattest mirrors read for read; ZPOKST and ZPONTS are
     neutralised; the text bitmap redraws only what changed (src/text.a).
-  - tools/osrun.py runs the module on the host 6809 with every os9 call scripted: 60 s of play,
-    every game frame checked (text bitmap, CLUT, line bitmap), 21 game frames a second at 34.6 ms
-    a frame (driver costs guessed). In the Wildbits MAME (no line engine) it starts, takes 5 and 1,
-    shows the attract and rating screens, and q exits cleanly.
-  - PROPOSED, NOT CODED: SS.Tick ($C7, GetStat, R$X = the 60 Hz tick count; plan 6.3). Without it
-    the program estimates (6% fast in the model). SS.MsDelta is approved but not in the driver.
-  - Nothing of this session is committed yet unless I said so.
+  - ONE PASS A TICK, AS JOUST (SS.Tick was proposed and withdrawn): the game frame is split, a
+    logic pass then drawing passes, the drawing a coroutine (DrwBeg/DrwRes/Spend) that gives the
+    tick back on an estimated budget; AvgFlush sizes each next batch (avg.a's new AV.RMAX).
+  - tools/osrun.py runs the module on the host 6809 with every os9 call scripted: 120 s of play,
+    every game frame checked (text bitmap, CLUT, line bitmap), 245.9 virtual IRQs a second, 1 tick
+    lost in 7,200, but 14 GAME FRAMES A SECOND (21 unsplit). In the Wildbits MAME (no line
+    engine) it starts, takes 5 and 1, shows the attract and rating screens, and q exits cleanly;
+    its game clock ran slow there (unexplained; MAME is no timing evidence).
+  - Committed: 8a5f02a (the platform layer before the split). The split and the sign-off numbers:
+    not committed unless I said so.
 
 DECIDED: Rev 3; D3 glyph masks on a front text bitmap; D4 keyboard (arrows, Shift fire, z zapper) +
 mouse (SS.MsDelta, approved) + joystick, no spinner; D6 model B and its conventions; D8 math
@@ -39,14 +42,25 @@ edited); the D6 hand work's recommendations; stage 2: redundant dots dropped, th
 (heavy frames stretch, no tuning before tline S) and the layout (AVGPG $0C00, window A) approved.
 The rest of the plan's recommendations stand unless I say otherwise.
 
-HARDWARE: the rc16 line engine DROPS PIXELS (gaps that move run to run; K2, two cores). The FPGA
-developer is on it and we ASSUME A FIX. Re-run bmtest C then L, and C then F, on each new core.
+HARDWARE: THE LINE ENGINE IS FIXED (user, 2026-09-23) and tempest RUNS ON THE K2: the picture is
+right (the user's photograph), but "it plays, but it is really slow". The build on the K2 image
+prints "G game frames, P passes in S s" on q: passes/s below 60 means ticks lost, frames/s is the
+real rate (the host model says 14.7 and 60). The developer has now sent a NEW CORE WITH THE LINE
+ENGINE AND A 640x240 BITMAP MODE: nothing about it is known here yet (the defs list only 320x240
+and 320x200 bitmaps, wildbits.d:866). Re-run bmtest C then L, and C then F, on each new core.
 
-THIS SESSION: first my answers to docs/status.md "The platform layer", "For review" (SS.Tick, the
-seams, the frame rate). Then, unless I choose otherwise: if SS.Tick is approved, the driver change
-(SS.Tick, and SS.MsDelta's) on wb/multiterm; else D5's sound output stage (plan stage 4: the POKEY
-image to the SIDs through the service window), proposing any SS call first. Update docs/status.md
-as pieces land; stop and report at the end.
+THIS SESSION: OPTIMIZE, AND LOOK AT 640x240.
+  1. The speed: I bring the sign-off's numbers from the K2 (frames, passes, seconds). From them,
+     decide where the time goes (the driver's real SS.BmLine cost against osrun.py's guess, lost
+     ticks, the split's slack) and speed it up. Remedies already written down (docs/status.md,
+     "The split frame"): real costs in the budgets, overlapping the logic with the drawing as the
+     arcade does, the raster row as an exact clock (a new absolute-address exception: my call),
+     and interpreter tuning; tline S measures the driver directly.
+  2. 640x240: find out from the new core's RTL (and whatever the developer sent) how the mode is
+     set and what the line engine and SS.BmLine/SS.BmClear need for it; whether grfdrv256 needs
+     changes (propose any SS call change for my review first); what it costs the port (bitmap
+     memory ~19 blocks a bitmap, the clear, the text bitmap, the interpreter's scale and clip).
+Update docs/status.md as pieces land; stop and report at the end.
 
 WHAT ONLY I CAN SUPPLY: hardware runs (tline once the core is fixed), new cores, and the decisions.
 
@@ -81,8 +95,9 @@ TOOLING (all in the Joust tree, shared):
     -n 30 (~25 min), --src --states captures/states_play.bin captures/states_attract.bin (~3 min).
     The captures are regenerable (command in docs/status.md, "D6 hand work", 4); run the fuzz in the
     background and never "pkill -f" a pattern your own command line contains.
-  - The module: cd src; make (budget and pic). The host run: python3 tools/osrun.py --seconds 60
-    [--png DIR --every N] [--no-tick] (~2 min a simulated minute). The Wildbits MAME types and
+  - The module: cd src; make (budget and pic); make EXTRA="-DRECUS=170" tries a budget. The host
+    run: python3 tools/osrun.py --seconds 60 [--png DIR --every N] [--passes] (~2 min a simulated
+    minute). avgtest.py --batch 0 tests AvgFlush's changing batch sizes. The Wildbits MAME types and
     snaps from a Lua -autoboot_script (it replaces -autoboot_command; keep the notifier's
     subscription in a global or it is collected after one frame).
   - The interpreter's test: python3 tools/avgtest.py captures/avg_play.bin captures/avg_attract.bin

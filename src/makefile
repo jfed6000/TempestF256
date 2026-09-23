@@ -2,13 +2,14 @@
 #
 #   make                          build tempest; the budget and PIC checks
 #   make install DSK=image.dsk    copy it to CMDS on a disk image (a targeted copy, nothing else)
+#   make EXTRA="-DRECUS=170"      a build with a frame.a budget changed (touch tempest.asm first)
 #
 # The host tests build the game alone from tempest.a (tools/xlattest.py --src, tools/avgtest.py).
 
 NITROS9DIR ?= /home/magnus/projects/wild/joust/nitros9_complete/nitros9
 AS          = lwasm.orig --6809 --format=os9 \
               --pragma=nosymbolcase,condundefzero,dollarnotlocal \
-              --includedir=$(NITROS9DIR)/defs -I $(NITROS9DIR)/level2/wildbits -I . -Dwildbits=1
+              --includedir=$(NITROS9DIR)/defs -I $(NITROS9DIR)/level2/wildbits -I . -Dwildbits=1 $(EXTRA)
 PROGS       = tempest
 # every source the module includes: a file missing here is not rebuilt (make sees no change)
 SOURCES     = tempest.asm data.a platform.a frame.a input.a gfx.a text.a avg.a avgtab.a glyphs.a \

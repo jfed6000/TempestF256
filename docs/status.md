@@ -6,8 +6,10 @@ from MAME byte-exact against Atari's ROM. Stage 2's interpreter is done on the h
 "Stage 2 on the host"; its CPU budget and layout approved). **The platform layer is built, for
 review** (section "The platform layer"): `src/tempest`, a 34,693-byte OS-9 module, runs the whole
 game on the host 6809 with the OS-9 calls scripted (`tools/osrun.py`, every frame checked) and
-starts, takes a coin and a start and exits cleanly on NitrOS-9 in the Wildbits MAME. **`SS.Tick` is
-proposed** (plan 6.3). Nothing has run on hardware.
+starts, takes a coin and a start and exits cleanly on NitrOS-9 in the Wildbits MAME. The loop runs
+**one pass a tick, the game frame split across passes** (`SS.Tick`, proposed first, was
+withdrawn): the game's clock keeps time, at 14 game frames a second in the model. Committed at
+`8a5f02a` before the split; the split is not committed. Nothing has run on hardware.
 
 ## Decisions so far
 
@@ -38,6 +40,17 @@ proposed** (plan 6.3). Nothing has run on hardware.
 shows gaps that move every run; a second pass fills most. DMA fills and CPU writes are clean. With the
 FPGA developer; **the port assumes a fix** (user). Full account: `docs/port-tempest.md` §4.2. Re-run
 bmtest `C`+`L` and `C`+`F` on each new core.
+
+**Fixed (user, 2026-09-23): "Line engine is fixed."** On the new core the K2 then ran **`tempest`
+(the split-frame build, edition 2), the first run on hardware: it plays.** The user's photograph of
+the square well in play shows solid lines, the well, claw and enemies in the right colours and
+places, and the glyph text (score, lives, high score, level) lined up with them. **"It plays, but
+it is really slow."** Not yet measured: the next build prints game frames, passes and seconds on
+`q` (the host model's own figures: 14.7 frames and 60 passes a second). The user's idea for later:
+**640×240**, to look more like a vector monitor, once the line engine can do it. The defs list only
+320×240 and 320×200 bitmaps (`wildbits.d:866`), so that is a core question first. **The same
+day the developer sent a core with the line engine and a 640×240 mode**: for the next session,
+with the optimisation.
 
 ## Stage 0 results (host, no hardware)
 
@@ -802,7 +815,7 @@ logo runs at about half speed.
 
 ## The platform layer (2026-09-23, host and MAME) — for review
 
-The module now exists: **`src/tempest`, an OS-9 program module of 34,693 bytes** (the budget is
+The module now exists: **`src/tempest`, an OS-9 program module of 34,873 bytes** (the budget is
 40,192), built by `make` in `src/` with the budget and **`make pic` clean**. The game, the
 interpreter and the platform layer run together on the host 6809 with the OS-9 calls played by a
 script, and start, draw text, take input and exit on NitrOS-9 in the Wildbits MAME. **Nothing has
@@ -816,7 +829,7 @@ run on hardware**, and MAME has no line engine, so no line has been drawn by a r
 | `src/makefile` | `make` builds, checks the budget (40,192) and runs `make pic`; `make install DSK=` is the targeted copy |
 | `src/data.a` | The data area, 8K: the arcade's 2K, the port's variables, the hardware shadows, `RELTAB`, `AVGPG`, then the platform's (the last text list, the CLUT buffer, windows, input, the loop) and a 2K stack from `$1800` |
 | `src/platform.a` | Joust's: start-up, window A (`F$AllRAM` + `F$MapBlk`, cleared, `VWIN`), `Map1`, pause (`SS.WSig`), the signal intercept, the terminal options, the exit on every path, the sign-off |
-| `src/frame.a` | The frame loop and **the IRQ on a virtual 246 Hz clock** (below), the game frame, the arcade's reset |
+| `src/frame.a` | The frame loop, **one pass a tick**, and **the IRQ on a virtual 246 Hz clock** (below); the game frame split across passes, the drawing a coroutine; the arcade's reset |
 | `src/input.a` | Keyboard, stick and mouse into the arcade's switch bytes and encoder (D4) |
 | `src/gfx.a` | Three bitmaps, the clear, the flip, **`AvgFlush` into `SS.BmLine`**, the CLUT from colour RAM |
 | `src/text.a` | **The text bitmap (D3)**: the interpreter's text list drawn as glyph masks, only what changed |
@@ -837,8 +850,8 @@ run on hardware**, and MAME has no line engine, so no line has been drawn by a r
   set: the vector generator is always halted** between frames, which `DISPLA`'s halt handshake
   needs. The encoder moves at most 7 counts a virtual IRQ, the rest wait (the IRQ reads a 4-bit
   difference, as the arcade's knob).
-- **Ticks** need a count, not a wait: **`SS.Tick` is proposed** (plan 6.3). The program asks at
-  start; without it, it sleeps a tick a pass and counts `1 + GFTKS` after a game frame.
+- **Ticks: one pass a tick, as Joust, and the game frame split** (below, "The split frame").
+  `SS.Tick` was proposed first and withdrawn (plan 6.3).
 - **`RANDOM` and `RANDO2`** (20 reads in the game) call `RNDA`/`RNDB`: a 16-bit xorshift (7, 9, 8),
   one state (`RNDST`), stepped a read, seeded from the clock. The differential tests give Atari's
   code the same generator read for read, and compare its final state (a one-line mutation is
@@ -849,7 +862,7 @@ run on hardware**, and MAME has no line engine, so no line has been drawn by a r
   defaults each run until the settings file (stage 7f). Its writes land in the shadow page, and
   its source pointers are made logical (`EASRCE` + the data area's page).
 - **The display** (D3, D9): bitmaps 0 and 1 the lines, double-buffered, the hidden one cleared
-  first in a game frame (`SS.BmClear`, wait mode 7, 16-bit; the CPU through the service window if
+  first in a game frame's logic pass (`SS.BmClear`, wait mode 7, 16-bit; the CPU through the service window if
   that ever fails) and shown after (`SS.Layer`, layer 1); bitmap 2 the text on layer 0 in front;
   layer 2 tile map 0, with tile maps off. One CLUT: `colour × 16 + intensity`, the 16 entries of
   each colour RAM byte that changed, one `SS.ClutWrite` for the range.
@@ -881,39 +894,163 @@ Also caught while building: case-insensitive clashes (`FRAMES` and `INPUT` with 
 table `LEVEL` against the defs' `Level` (= 2), which assembled without error, as an address of 2,
 until renamed (`LEVTAB`). A scan of every game operand against the defs' names finds none left.
 
-### Time (`osrun.py`: the host 6809's own cycles, the driver's side guessed: 150 µs a call, 400 a grfdrv call, `SS.BmLine` 474 µs + 27.5 µs a record)
+### The split frame (2026-09-23, after review)
 
-| 60 s of play | median | 95% | max |
-|---|---:|---:|---:|
-| A game frame, all of it | 34.6 ms | 41.8 | 121 (the first) |
-| clear, EXSTAT, NONSTA, DISPLA | 10.0 | 12.2 | 13.4 |
-| AvgRun with `SS.BmLine`, the flip, the CLUT | 24.4 | 28.5 | 36.5 |
-| the text bitmap | 0.2 | 1.9 | 102 (a whole screen of text changing) |
+`SS.Tick` was withdrawn in review. The loop now counts ticks as Joust does, **one pass a tick**
+(`F$Sleep X=2`, the controls, 525/128 virtual IRQs), which is right only if **no pass runs past
+its tick**. A game frame is about 35 ms of work, so it is split:
 
-**21 game frames a second, not the arcade's 27.3**, with the virtual IRQ exact (245.9 a second) so
-the sound and the clocks keep time. A frame of about 34.6 ms is just over two ticks, and a frame
-can start only at a tick, so most take three. The approved answer stands (heavy frames stretch;
-tuning after `tline S`), but in this model it is the median frame, not the heavy one, that
-stretches: **`tline S` decides it**, and 1.3 ms of driver time would bring the median frame
-under two ticks. Without `SS.Tick` the estimate gives 260 virtual IRQs a second (6% fast).
+- **The logic pass**: when FRTIMR reaches 9, the clear of the hidden bitmap, `EXSTAT`, `NONSTA`,
+  `DISPLA` (10-13 ms with the controls and the IRQs), and nothing else. The logic varies too
+  much to share its pass with drawing.
+- **Drawing passes**: `Draw` (the interpreter into the hidden bitmap, the flip, the CLUT, the
+  text) runs as a **coroutine on a stack of its own** (`DRWSTK`, 384 bytes; `DrwBeg`, `DrwRes`,
+  `Spend`). Each step is charged to the pass's budget (`WORK`, 12,500 estimated µs) and the
+  coroutine gives the tick back when the next step would not fit. `AvgFlush` charges each
+  `SS.BmLine` call (160 µs a record, interpreted and drawn, and 474 a call) and **sizes the next
+  batch to the budget left** (`NxtBat`, through a new byte of the interpreter's page, `AV.RMAX`:
+  the caller's batch size, 0 = `RBATCH`); the text charges each glyph (1,000 µs and 60 a row,
+  which covers a remap of the service window).
+- A frame whose drawing is not done when FRTIMR next reaches 9 starts late, as the arcade's do.
+  Between drawing passes only the IRQ's code runs, which the arcade already ran at any moment.
+
+**Measured on the host (`osrun.py`, 120 s of play; the driver's costs still guessed):**
+
+| | |
+|---|---|
+| Virtual IRQs | **245.9 a second** (the arcade's 246.1) |
+| Passes | median 10.3 ms, 95% 13.1, 99% 14.7, max 17.0 of the 16.7 ms tick: **1 tick lost in 7,200** |
+| Game frames | **14.1 a second** (median 3.4 ticks from the logic to the drawing's end) |
+| Checks | every game frame's text bitmap, CLUT and line bitmap right |
+| `avgtest.py` (the interpreter with `AV.RMAX`) | **6,282 frames byte-exact** at the default batch and with `--batch 0` (a random size set at every flush); **10,000 random lists** with `--batch 0`, none failed |
+| The game's files | untouched by the split: the byte-exact results above stand |
+
+How the estimates were chosen: a record's interpretation cost is 99 µs at the median and 208 at
+the 99th percentile, and no free count (records, texts, control transfers, AVG instructions)
+predicts a batch better than ±1.7-2.3 ms at the 95th; so the estimate is set high enough to lose
+almost no ticks. Tried in 60 s runs: 145 µs a record, 30 ticks lost and 15.1 frames a second;
+160, 3 lost, 14.8; 180, 1 lost, 14.1; **160 with a 12.5 ms budget, none lost, 14.6** (kept).
+
+**The cost: 14 game frames a second against 21 unsplit** (the unsplit loop kept perfect time
+only with a tick count). A logic pass uses about 11 ms of its 16.7 and the drawing passes about
+10, the rest being the margin the estimates need. Ways to win it back, none built:
+
+1. **An exact clock instead of estimates.** VICKY's raster row (MAME's `wbjr2` reads it at
+   `$FFDA/$FFDB`; unchecked in the RTL) would let `Spend` fill each pass to the tick. It would be
+   a third absolute-address exception, a read only.
+2. **Overlap the logic with the drawing**, as the arcade does: the game's display lists are
+   double-buffered for an AVG that runs beside it, and its halt handshake (`IN1` bit 6) would say
+   "not halted" while a drawing is under way. Arcade-faithful, but the tests do not cover the
+   interleaving yet.
+3. **The driver's real cost** (`tline S`): every estimate above rests on a guessed `SS.BmLine`.
+
+**In the Wildbits MAME** the split build starts, takes a coin and a start, shows the rating
+screen and exits cleanly, as before. Its rating countdown ran 7 to 0 in 10 s of MAME's time,
+i.e. the game's clock ran slow there. **Unexplained, and MAME is no evidence of timing**; the host
+model keeps time. A hardware run will say.
 
 ### For review
 
-1. **`SS.Tick` ($C7, GetStat)**, plan 6.3: layout and the driver change (two bytes in GrfMem,
-   `AltISR`, the GetStat in vtio).
+1. ~~`SS.Tick`~~ **Withdrawn (user, 2026-09-23)**; the frame is split instead ("go", the same day).
 2. **The seams above**: the generator for `RANDOM` and the two neutralised POKEY checks; the IRQ
    as a subroutine; the EAROM not read until the settings file; the switch polarities.
-3. **The frame rate** in the model (21 a second), for after `tline S`.
+3. **The frame rate**: 14 a second split (above), and the three ways to win it back: the raster
+   row as a clock (an exception), overlapping logic and drawing, `tline S`.
 4. **Next**, by the plan: the hardware half needs the fixed core (the module can go on the K2
    as it is, `make install DSK=`). Without hardware: D5's sound output stage (stage 4, the SIDs on
-   the service window), or `SS.MsDelta` and `SS.Tick` in the driver once approved.
+   the service window), or `SS.MsDelta` in the driver.
+
+## Optimising, and 640×240 (2026-09-23) — for review
+
+### The K2's first numbers, and the lost tick
+
+The sign-off on the K2 (line-engine-fixed core, the split build): **1,267 game frames, 5,695
+passes in 116 s**. 116 s is 6,960 ticks, so **1,265 ticks were lost: one per game frame, almost
+exactly** (10.9 frames and 49.1 passes a second; the game's clock, which counts passes, ran at
+82%).
+
+**The cause: the hidden bitmap's clear waited for the next vertical blank.** `SS.BmClear` wait
+mode 7 polls until the fill is done, and the DMA engine only fills in vertical blanking
+(`TinyVKY_DMA_Controller.v` `WAIT_2_TRF`: at once if armed before line 42 of 525, otherwise from
+the next line 0, which is also the tick). The logic pass arms it after the tick's ISR, the wake,
+the controls and the virtual IRQs, well past line 42, so it waited ~15 ms for the next blank and
+the logic then ran into the tick after that. This also explains **the slow game clock seen in the
+Wildbits MAME** (open item 4), assuming MAME's DMA waits the same way (not checked).
+
+`osrun.py` had the fill instant. **It now models the engine** (the fill starts at once inside the
+first 42 lines, else at the next tick; the CPU halted 384 µs for it in 16-bit mode; mode 7 waits
+for it; mode 0 returns; `GetStat SS.BmClear` reports busy until it has run; an `SS.BmLine` into
+the bitmap before its clear has run is an error). With the old build it gives the hardware's
+figure: **every logic pass 25 ms (median), over the tick, 5.4 s of 30 spent waiting**.
+
+**The fix (built, host-checked, not yet run on hardware):** `GamLog` arms the clear with wait
+mode 0 (`BmArm`, `gfx.a`) and goes on with the logic; the drawing's first step, which always
+comes in a later pass (the logic pass leaves it no budget), calls `BmWait` (`GetStat
+SS.BmClear` until idle, bounded; on a timeout `NODMA` latches and the CPU clears). The fixed core
+lets the CPU run while a fill is pending (the mode-7 note in `grfdrv256.asm`). Start-up's clears
+still use mode 7.
+
+| `osrun.py`, 30 s of play | Before (DMA modelled) | After |
+|---|---:|---:|
+| Logic pass, median | 25.4 ms | 11.2 ms |
+| Ticks lost | one a game frame | **0** |
+| Game frames a second | (not printed in that run) | **14.6** |
+| Checks (text, CLUT, lines; no line before its clear) | pass | pass |
+
+**The first build of it did not start on the K2** (user: "not even a title screen"): `GetStat
+SS.BmClear` also returns the DMA's destination in R$Y and R$U (`grfdrv256.asm` `GSBmClear`, a
+diagnostic), and `BmWait` did not keep U, the data area, across it. `osrun.py` left R$U alone
+for that call, so it missed it; it now returns the driver's diagnostic registers, and `BmWait`
+saves Y and U. The rebuilt module passes `osrun.py` and, **in the Wildbits MAME, starts, takes
+`5` and `1`, shows the rating screen, and `q` gives the sign-off**. The other grfdrv calls the
+program makes were checked for registers they return: none else differs from the model.
+
+**On the K2 (user, 2026-09-23): 1,721 game frames, 6,701 passes in 112 s: 15.4 game frames and
+59.8 passes a second** (before: 10.9 and 49.1). 112 s is 6,720 ticks, so 19 lost, within the
+sign-off's own error (whole seconds from `F$Time`, ±60 ticks). 3.9 passes a game frame, better
+than the model's 4.1: the hardware draws a little faster than `osrun.py` guesses. **Confirmed.**
+
+What was expected: about **60 passes and 13-14 game frames a second**: the hardware's
+4.5 passes a game frame, without the lost one (the model's is 4.1). Module on
+`l2_wildbitsk2.dsk` (targeted copy, compared). **Untested on hardware.**
+
+### 640×240 on the new core (commit `131a202`, read, not changed)
+
+- **The mode** (the developer's note and the RTL): a plane's bitmap control byte bit 4 (HIRES4)
+  makes it 640×240 at 4 bits a dot, high nibble the left dot; bits 7:5 the GROUP, the dot's CLUT
+  entry `GROUP × 16 + nibble`; nibble 0 transparent. `$FFCB` bit 0 does it for every plane (not
+  wanted: the text plane stays 320). **Same 76,800 bytes a bitmap**, same stride: the port's
+  memory, the clear and the text bitmap are unchanged (not 19 blocks, as feared).
+- **The line engine** (`LineDraw.v`): in HIRES4 (the target plane's bit 4, or `$FFCB` bit 0)
+  X runs 0-639 and each pixel is a **read-modify-write of its nibble** (the colour's low 4 bits).
+  The FIFO is still 4,096 pixels, and its full flag is now connected: the walk stalls rather than
+  losing pixels. Each hi-res pixel costs an SRAM read and a merge before its write, still only in
+  the engine's draw slots, so draining is slower by an unmeasured factor.
+- **grfdrv256 already has `SS.BmCfg` ($ED)**: HIRES4 and GROUP per plane. **`SS.BmLine` needs a
+  change** (for review, not coded): its range check is fixed at X ≤ 319 (`LD.MaxX`) and its FIFO
+  margin at 320 pixels (`LD.Room`); for a HIRES4 target they would become 639 and 640. No layout
+  change: the record stays X0, X1, Y0, Y1, colour. With the full flag connected, a line that
+  stalls on a full FIFO could also outlast the COMPLETE poll (`LD.Poll`, 200), which then lowers
+  GO and drops the rest; the 640 margin avoids that as the 320 one does now.
+- **Colours: 16 a plane, 15 visible.** The port's CLUT is colour × 16 + intensity. In 40 s of play
+  the game draws only **14 colour/intensity pairs, at intensities 10, 12 and 14** (colour 6/12
+  29%, 1/12 20%, 1/10 14%, ...). Two ways: a fixed map (colour RAM index to nibble, intensity
+  dropped or 2 levels for the common colours), or a per-frame map of the pairs in use (the attract
+  logo's intensity ramp needs more than 15; it would fall back to the nearest). My recommendation:
+  the fixed map first, colour index + 1 (colour 15 shares 15), full intensity, and see it.
+- **The port's other costs**: `avg.a`'s X scale doubles and its clip becomes 0-639 (the records
+  already carry 16-bit X); the record's colour byte becomes the nibble; `ClutCommit` writes 16
+  entries. Horizontal runs double in pixels, so a frame's pixels rise by perhaps half, each one an
+  RMW: `tline S` (or the sign-off's numbers) on a HIRES4 plane decides whether it is affordable.
 
 ## Open items
 
 1. The line-engine holes (FPGA developer).
 2. `tline` for stage 1, when the core is fixed: above all the per-record cost.
 3. `SS.MsDelta` storage (5 bytes of vtio statics, 242 → 247 of 256), and its driver code.
-4. **`SS.Tick`** (plan 6.3), proposed 2026-09-23: for review, then the driver change.
+4. The frame rate of the split loop (14 a second in the model); the lost tick a game frame on the
+   K2 and the slow clock in MAME: the clear's wait for vertical blank, fixed and confirmed on the
+   K2, 15.4 game frames a second ("Optimising").
 5. The coprocessor divide's read-after-write timing, and its remainder, on hardware (D6 pilot,
    "Unchecked"; `DIVF` reads the remainder). Now also the multiplier's (`avg.a`, approved).
 6. The hardware half: the module itself can now be the first picture (`make install DSK=`, the

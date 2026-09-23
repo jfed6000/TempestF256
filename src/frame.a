@@ -2,103 +2,157 @@
 * frame.a - the frame loop: the arcade's IRQ and MAINLN on the 60 Hz
 *   tick (docs/port-plan.md section 2, decision D7).
 *
-*   The arcade's IRQ is 12.096 MHz / 4096 / 12 = 246.09375 Hz, exactly
-*   525/128 of the 60 Hz tick.  Each tick adds 525 to VACC and runs one
-*   virtual IRQ (VirIRQ: the input shadows, then ALHAR2's IRQ, which
-*   runs MOOLAH, MODSND and FRTIMR) for each 128 it holds.  A game frame
-*   runs when FRTIMR reaches 9, the arcade's MAINLN rule: 2 or 3 ticks,
-*   27.3 a second, longer when the work overruns, as on the arcade.
+*   ONE PASS A TICK, AS JOUST.  Each pass sleeps to the next tick and
+*   runs the virtual IRQs that tick owes: the arcade's IRQ is 12.096 MHz
+*   / 4096 / 12 = 246.09375 Hz, exactly 525/128 of the tick, so each
+*   pass adds 525 to VACC and runs one virtual IRQ (VirIRQ: the input
+*   shadows, then ALHAR2's IRQ, which runs MOOLAH, MODSND and FRTIMR)
+*   for each 128 it holds.  Passes count the ticks, so NO PASS MAY RUN
+*   PAST ITS TICK: one that does loses a tick, and the game's clock,
+*   its sound and its timers fall behind by that much.
 *
-*   Ticks come from SS.Tick (proposed, docs/port-plan.md 6.3): the
-*   ticks since the last pass, so a pass that ran long (a game frame
-*   with its drawing is about two ticks) still owes the virtual IRQs of
-*   the ticks it covered, and the loop sleeps only when no tick has
-*   passed.  Without the call (a driver that does not have it) every
-*   pass sleeps to the next tick and counts 1, and GFTKS more after a
-*   game frame: an estimate, so sound and the game's clocks run a little
-*   slow or fast.
+*   So the game frame is split across passes.  When FRTIMR reaches 9
+*   (the arcade's MAINLN rule), a pass runs the game's logic (GamLog:
+*   the clear, EXSTAT, NONSTA, DISPLA, 10-13 ms) and starts the drawing,
+*   which gives the tick back at once; the drawing (Draw: AvgRun into the hidden bitmap, the
+*   flip, the CLUT, the text) runs as a coroutine on a stack of its own
+*   and gives the tick back whenever the pass's budget (WORK, estimated
+*   microseconds) would not cover its next step (Spend).  A game frame
+*   whose drawing is not done when FRTIMR next reaches 9 starts late,
+*   as the arcade's own frames do when they overrun.
 ********************************************************************
 
-SS.Tick             equ       $C7                 GetStat: R$X = the 60 Hz tick count (PROPOSED)
-MAXTKS              equ       8                   at most this many ticks owed at once
-GFTKS               equ       2                   without SS.Tick: the ticks a game frame is taken to cost (osrun.py)
 VIRQN               equ       525                 virtual IRQs a tick, times VIRQD
 VIRQD               equ       128
+* the budgets, in estimated microseconds (tools/osrun.py measures the passes they give)
+                    ifndef    BUDPAS
+BUDPAS              equ       12500               a drawing pass: the tick less the sleep, the IRQs, input and a margin
+                    endc
+BUDLOG              equ       0                   what a logic pass leaves for the drawing: nothing, since
+*                                                 the logic itself runs 9.7 to 12.6 ms (osrun.py)
+* what a step costs, for Spend (estimated: the interpreter ~105 us a record on the host 6809, the
+* driver 474 us a call and 27.5 a record by the count of its instructions; tline S will say)
+                    ifndef    RECUS
+RECUS               equ       160                 a record, interpreted and drawn (more than 128: gfx.a NxtBat)
+                    endc
+RECK                equ       32768/RECUS         NxtBat's multiplier: records = (D / 128) * RECK / 256
+CALLUS              equ       474                 an SS.BmLine call
+MINREC              equ       8                   the smallest batch worth a call
+MINBUS              equ       MINREC*RECUS+CALLUS the smallest next batch
+FLIPUS              equ       1500                the flip and the CLUT, typically
+GLYUS               equ       1000                a glyph erased or drawn: this, and ROWUS a row (text.a);
+ROWUS               equ       60                  measured 370-1,470 us, a remap of the window included
 
-MainLoop            tst       SIGCODE,u
+MainLoop            ldx       #2                  wait for the next tick (X = 1 only gives up the time slice)
+                    os9       F$Sleep
+                    ldd       PASSES,u            (the sign-off reports them)
+                    addd      #1
+                    std       PASSES,u
+                    tst       SIGCODE,u
                     lbne      Done
                     tst       PAUSED,u
                     lbne      PausWt
-                    bsr       Ticks               B = the ticks since the last pass
-                    tstb
-                    bne       ml0                 time has passed (a game frame ran long): go on
-                    ldx       #2                  wait for the next tick (X = 1 only gives up the time slice)
-                    os9       F$Sleep
-                    bra       MainLoop
-ml0                 pshs      b
+                    ldb       #1                  one tick
                     lbsr      InFram              the keys, the stick, the mouse (input.a)
-                    puls      b
                     tst       QUITKEY,u
                     lbne      Done
-ml1                 tstb                          the virtual IRQs the ticks owe
-                    beq       ml3
-                    pshs      b
-                    ldd       VACC,u
+                    ldd       VACC,u              the virtual IRQs this tick owes
                     addd      #VIRQN
                     std       VACC,u
-ml2                 ldd       VACC,u
+ml1                 ldd       VACC,u
                     subd      #VIRQD
-                    blo       ml2x
+                    blo       ml2
                     std       VACC,u
                     lbsr      VirIRQ
-                    bra       ml2
-ml2x                puls      b
-                    decb
                     bra       ml1
-ml3                 lda       <FRTIMR             the arcade's MAINLN: a game frame once 9 have run
+ml2                 ldd       #BUDPAS
+                    std       WORK,u
+                    tst       DRAWNG,u            a frame's drawing under way: go on with it
+                    bne       ml3
+                    lda       <FRTIMR             the arcade's MAINLN: a game frame once 9 have run
                     cmpa      #9
                     blo       MainLoop
-                    lbsr      GamFrm
+                    lbsr      GamLog
+                    ldd       #BUDLOG
+                    std       WORK,u
+                    lbsr      DrwBeg
+                    bra       MainLoop
+ml3                 lbsr      DrwRes
                     bra       MainLoop
 
 ********************************************************************
-* Ticks - B = the ticks since the last pass, 0 to MAXTKS
-* TickRst - start counting afresh (start-up, and after a pause)
+* GamLog - a game frame's logic: MAINLN's three calls.  The hidden line
+*   bitmap's clear is armed first (BmArm): the DMA engine runs it in
+*   the next vertical blank, before the drawing's first pass, which
+*   checks (Draw, BmWait).  Waiting for it here cost the rest of the
+*   tick (docs/port-plan.md D9: double buffer).
 ********************************************************************
-Ticks               tst       TICKOK,u
-                    beq       tk2
-                    lda       #0                  path 0
-                    ldb       #SS.Tick
-                    os9       I$GetStt            X = the count
-                    bcs       tk2
-                    tfr       x,d
-                    pshs      d
-                    subd      LASTTK,u
-                    puls      x
-                    stx       LASTTK,u
-                    cmpd      #MAXTKS
-                    bls       tk1
-                    ldb       #MAXTKS             a stall (or the count wrapped oddly): no flood
-tk1                 rts
-tk2                 clr       TICKOK,u            no SS.Tick: sleep a tick, then count it as 1,
-                    ldx       #2                  and GFTKS more after a game frame
-                    os9       F$Sleep
-                    ldb       #1
-                    tst       TICKGF,u
-                    beq       tk3
-                    clr       TICKGF,u
-                    addb      #GFTKS
-tk3                 rts
+GamLog              clr       <FRTIMR             ALEXEC:53 LDA I,0 / STA FRTIMR
+                    lda       SHOWN,u
+                    eora      #1
+                    lbsr      BmArm               the hidden line bitmap, cleared in the next blank
+                    lbsr      EXSTAT              ALEXEC:55-57
+                    lbsr      NONSTA
+                    lbra      DISPLA
 
-TickRst             clr       TICKOK,u
-                    clr       TICKGF,u
-                    lda       #0
-                    ldb       #SS.Tick
-                    os9       I$GetStt
-                    bcs       trx
-                    stx       LASTTK,u
-                    inc       TICKOK,u
-trx                 rts
+********************************************************************
+* The drawing, a coroutine.
+*
+*   DrwBeg - start it: the main loop's S to MAINSP, S to DRWSTK; Draw.
+*     Returns to the loop when Draw finishes, or when it Spends past the
+*     pass's budget (DRAWNG then says it is not done).
+*   DrwRes - go on with it from where Spend left it.
+*   Spend - D = what the step just done cost, X = what the next step
+*     will cost (estimated microseconds): charge the first to WORK and,
+*     when WORK will not cover the second, give the tick back.  Every
+*     register but S is kept across it; U must be the data area.  Only
+*     the drawing calls it.
+********************************************************************
+DrwBeg              sts       MAINSP,u
+                    leas      DRWSTK+DRWSTL,u
+                    inc       DRAWNG,u
+                    bsr       Draw
+                    clr       DRAWNG,u
+                    ldd       GFRAMS,u
+                    addd      #1
+                    std       GFRAMS,u
+DrwEnd              lds       MAINSP,u            the frame is drawn (tools/osrun.py checks it here)
+                    rts
+
+DrwRes              sts       MAINSP,u
+                    lds       DRWSP,u
+                    puls      cc,a,b,dp,x,y,u,pc  back into Spend's caller
+
+Spend               pshs      cc,a,b,dp,x,y,u
+                    pshs      d
+                    ldd       WORK,u
+                    subd      ,s++
+                    std       WORK,u
+                    pshs      x
+                    cmpd      ,s++                enough left for the next step?
+                    bge       sp1
+                    sts       DRWSP,u             no: the loop has the rest of the tick
+                    lds       MAINSP,u
+                    rts                           (as if DrwBeg or DrwRes returned)
+sp1                 puls      cc,a,b,dp,x,y,u,pc
+
+* Draw - the list into the hidden bitmap, shown; then the colours and the
+*   text, which are single-buffered
+Draw                ldd       #0                  room for the first batch?
+                    ldx       #MINBUS
+                    bsr       Spend
+                    lbsr      BmWait              the clear GamLog armed has run
+                    lbsr      NxtBat              its size, from the budget
+                    lbsr      AvgRun              records to AvgFlush (gfx.a), which Spends
+                    ldd       #0                  room for the flip and the CLUT?
+                    ldx       #FLIPUS
+                    bsr       Spend
+                    lbsr      Flip
+                    lbsr      ClutCommit
+                    ldd       #FLIPUS
+                    ldx       #GLYUS+11*ROWUS     room for the biggest glyph?
+                    bsr       Spend
+                    lbra      TxCommit            which Spends a glyph at a time
 
 ********************************************************************
 * VirIRQ - one virtual IRQ: the switches into the shadows the IRQ reads
@@ -111,7 +165,7 @@ trx                 rts
 *     HW_0C00 IN1: active low: coins (bit 2 the left, the coin key),
 *             slam, test, diagnostic step all open; bit 6 1 = the vector
 *             generator is halted, which the port's always is between
-*             frames (AvgRun is synchronous)
+*             frames (AvgRun finishes before the next logic pass)
 *   The encoder moves at most 7 counts a virtual IRQ (the IRQ reads a
 *   4-bit difference); the rest waits in KNBPND for the next.
 ********************************************************************
@@ -147,30 +201,6 @@ vi3                 sta       HW_0C00,u
                     lbra      IRQ
 
 ********************************************************************
-* GamFrm - one game frame: MAINLN's three calls, then the picture.
-*   The hidden line bitmap is cleared first, while the tick that woke
-*   us is recent (docs/port-plan.md D9: double buffer, synchronous
-*   clear); the list is interpreted into it; it is shown; then the
-*   colours and the text, which are single-buffered, follow.
-********************************************************************
-GamFrm              clr       <FRTIMR             ALEXEC:53 LDA I,0 / STA FRTIMR
-                    inc       TICKGF,u
-                    lda       SHOWN,u
-                    eora      #1
-                    lbsr      BmClr               the hidden line bitmap
-                    lbsr      EXSTAT              ALEXEC:55-57
-                    lbsr      NONSTA
-                    lbsr      DISPLA
-                    lbsr      AvgRun              the list into SS.BmLine records (AvgFlush)
-                    lbsr      Flip
-                    lbsr      ClutCommit
-                    lbsr      TxCommit
-                    ldd       GFRAMS,u
-                    addd      #1
-                    std       GFRAMS,u
-                    rts
-
-********************************************************************
 * GamInit - the arcade's RESET (ALTES2:238-296) less its self-test,
 *   then MAINLN's start (ALEXEC:45-47).  RAM and vector RAM are clear
 *   already.  The EAROM is not read (REHIIN): the high scores are the
@@ -189,4 +219,4 @@ GamInit             lda       #$7F                the switches at rest (VirIRQ)
                     lbsr      INIDSP              ALTES2:294
                     lbsr      INISOU              ALEXEC:45
                     clr       <QSTATE             ALEXEC:46-47 CNEWGA
-                    lbra      TickRst
+                    rts

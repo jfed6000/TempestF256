@@ -40,6 +40,8 @@ st1                 clr       ,x+
                     lbcs      Quit
                     lbsr      InInit              the mouse, if SS.MsDelta answers
                     lbsr      GamInit             the arcade's reset, less its self-test
+                    leax      T0BUF,u             the time the loop starts (the sign-off's numbers)
+                    os9       F$Time
                     lbra      MainLoop            frame.a
 
 Done                clrb
@@ -159,8 +161,9 @@ cu1                 lbsr      ExitMsg             clear the screen and sign off
 *
 *   Coming forward, grfdrv256 restores this terminal's CLUTs and
 *   bitmaps itself; CLSENT is complemented so the next frame sends every
-*   colour again anyway, and the tick count is taken afresh so the time
-*   away is not owed as virtual IRQs.
+*   colour again anyway.  The loop counts passes, not ticks, so the time
+*   away is not owed as virtual IRQs: the game stood still.  A frame's
+*   drawing that was under way goes on where it stopped.
 ********************************************************************
 PausWt              ldx       #30
                     os9       F$Sleep
@@ -176,7 +179,6 @@ pr1                 lda       ,x+
                     sta       ,y+
                     decb
                     bne       pr1
-                    lbsr      TickRst
                     lbra      MainLoop
 
 ********************************************************************
@@ -280,4 +282,116 @@ ExitMsg             leax      ByeMsg,pcr
                     ldy       #1                  an error: just clear the screen
 em1                 lda       #1                  stdout
                     os9       I$Write
+                    tst       EXITST,u
+                    bne       emx
+                    tst       T0BUF,u             the loop never started
+                    beq       emx
+                    bsr       Stats
+                    lda       #1
+                    os9       I$Write
+emx                 rts
+
+********************************************************************
+* Stats - the run in numbers, for the sign-off: "GGGGG game frames,
+*   PPPPP passes in SSSSS s".  One pass a tick means passes = 60 a
+*   second; fewer is ticks lost to passes that ran long.
+*   Exit: X = the line, Y = its length.
+********************************************************************
+Stats               leax      TIMBUF,u            now
+                    os9       F$Time
+                    ldb       TIMBUF+3,u          elapsed = ((h - h0) * 60 + m - m0) * 60 + s - s0
+                    subb      T0BUF+3,u
+                    bpl       ss1
+                    addb      #24                 past midnight
+ss1                 lda       #60
+                    mul
+                    pshs      d
+                    ldb       TIMBUF+4,u
+                    subb      T0BUF+4,u
+                    sex
+                    addd      ,s++
+                    pshs      d                   minutes
+                    lda       #60
+                    ldb       1,s
+                    mul                           (a run of up to 4 hours; more wraps)
+                    pshs      d
+                    lda       #60
+                    ldb       2,s
+                    mul
+                    tfr       b,a
+                    clrb
+                    addd      ,s++
+                    leas      2,s
+                    pshs      d
+                    ldb       TIMBUF+5,u
+                    subb      T0BUF+5,u
+                    sex
+                    addd      ,s++                D = seconds
+                    pshs      d
+                    leay      STLINE,u
+                    ldd       GFRAMS,u
+                    bsr       Dec5
+                    leax      StTx1,pcr
+                    bsr       StCpy
+                    ldd       PASSES,u
+                    bsr       Dec5
+                    leax      StTx2,pcr
+                    bsr       StCpy
+                    puls      d
+                    bsr       Dec5
+                    leax      StTx3,pcr
+                    bsr       StCpy
+                    tfr       y,d
+                    leax      STLINE,u
+                    pshs      x
+                    subd      ,s++
+                    tfr       d,y
                     rts
+
+* StCpy - the text at X (ended by 0) to Y+
+StCpy               lda       ,x+
+                    beq       scx
+                    sta       ,y+
+                    bra       StCpy
+scx                 rts
+
+* Dec5 - D (unsigned) as 5 decimal digits at Y+, leading zeros as spaces.  X clobbered.
+Dec5                pshs      d                   4,s = the value
+                    leax      Pow10,pcr
+                    lda       #5
+                    pshs      a                   3,s = digits left
+                    clr       ,-s                 2,s = a digit other than 0 printed
+                    leas      -2,s                (1,s spare) 0,s = this digit
+dc1                 lda       #'0
+                    sta       ,s
+                    ldd       4,s                 the value
+dc2                 subd      ,x
+                    blo       dc3
+                    inc       ,s
+                    bra       dc2
+dc3                 addd      ,x++
+                    std       4,s
+                    lda       ,s
+                    cmpa      #'0
+                    bne       dc4
+                    tst       2,s
+                    bne       dc5
+                    ldb       3,s
+                    cmpb      #1                  the last digit is always printed
+                    beq       dc5
+                    lda       #$20
+                    bra       dc5
+dc4                 inc       2,s
+dc5                 sta       ,y+
+                    dec       3,s
+                    bne       dc1
+                    leas      6,s
+                    rts
+
+Pow10               fdb       10000,1000,100,10,1
+StTx1               fcc       / game frames,/
+                    fcb       0
+StTx2               fcc       / passes in/
+                    fcb       0
+StTx3               fcc       / s/
+                    fcb       $0D,0

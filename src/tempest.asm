@@ -21,6 +21,10 @@
 *   1      2026/09/23  Claude
 * The platform layer: start-up, the frame loop and the virtual IRQ,
 * input, the display, the text bitmap, the exit.
+*   2      2026/09/23  Claude
+* One pass a tick, as Joust: the game frame is split across passes, the
+* drawing a coroutine that gives the tick back on a budget (SS.Tick,
+* proposed for edition 1, is withdrawn).
 ********************************************************************
 
                     nam       tempest
@@ -37,7 +41,7 @@
 tylg                set       Prgrm+Objct
 atrv                set       ReEnt+rev
 rev                 set       $00
-edition             set       1
+edition             set       2
 
 ModBeg              mod       eom,name,tylg,atrv,start,size the module's first byte (reloc.a)
 
@@ -52,7 +56,8 @@ name                fcs       /tempest/
                     include   input.a
                     include   gfx.a
                     include   text.a
-* the vector generator, and the tables it and the text bitmap read
+* the vector generator, and the tables it and the text bitmap read.  AvgFlush sizes each batch
+* from the pass's budget (gfx.a NxtBat), so the drawing can give the tick back between them
                     include   avg.a
                     include   avgtab.a
                     include   glyphs.a

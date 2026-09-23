@@ -165,14 +165,25 @@ abok                leas      1,s
 *   the service window from then on, as Joust does.
 *   Exit: carry = error in B.  U kept.
 ********************************************************************
-BmClr               tst       NODMA,u
+BmClr               ldb       #DmaWt.Poll<<DmaWt.Shift+1 poll until done, 16-bit
+                    bra       bcgo
+* BmArm - the same, but armed only (wait mode 0): the fill runs in the
+*   next vertical blank, or at once inside the first 42 lines of one
+*   (the DMA engine's WAIT_2_TRF), with the CPU halted while it runs.
+*   Mode 7 spent the rest of the frame waiting for that blank: a tick
+*   lost every game frame on the K2 (docs/status.md, "Optimising").
+*   Nothing may draw into the bitmap before BmWait says it is done.
+BmArm               ldb       #DmaWt.None<<DmaWt.Shift+1 arm and return, 16-bit
+bcgo                tst       NODMA,u
                     bne       BmClrCPU
                     pshs      a,u
-                    tfr       a,b
+                    tfr       b,a                 R$X high = the flags, low = colour 0
+                    clrb
+                    tfr       d,x
+                    ldb       ,s
                     clra
                     tfr       d,y                 R$Y low = bitmap #, high = arming line 0
                     ldu       #0                  all rows
-                    ldx       #(DmaWt.Poll<<DmaWt.Shift+1)*256 poll until done, 16-bit; colour 0
                     clra                          path 0
                     ldb       #SS.BmClear
                     os9       I$SetStt
@@ -202,6 +213,30 @@ bcok                clrb
 bcerr               leas      2,s
                     rts
 
+* BmWait - until the fill BmArm armed has run (GetStat SS.BmClear, R$X
+*   = 0 idle).  It has, by the next tick, so this normally asks once.
+*   Bounded: a fill that never ends latches NODMA and the CPU clears the
+*   hidden bitmap instead.  U kept (the call returns R$Y and R$U too,
+*   a diagnostic); A, B, X, Y clobbered.
+BmWait              tst       NODMA,u
+                    bne       bwx
+                    ldy       #2000
+bw1                 pshs      y,u
+                    clra                          path 0
+                    ldb       #SS.BmClear
+                    os9       I$GetStt            (R$Y and R$U return the DMA's destination)
+                    puls      y,u
+                    bcs       bwbad
+                    cmpx      #0
+                    beq       bwx
+                    leay      -1,y
+                    bne       bw1
+bwbad               inc       NODMA,u
+                    lda       SHOWN,u
+                    eora      #1
+                    lbra      BmClrCPU
+bwx                 rts
+
 ********************************************************************
 * AvgFlush - the interpreter's batch (avg.a): X = the records, B = the
 *   count (1-255), U = the data area, DP its page; may clobber all but
@@ -209,6 +244,8 @@ bcerr               leas      2,s
 *   the driver returns short when the line engine's FIFO lacks room.
 *   A call that draws none 20 times running, or an error (our terminal
 *   hidden), gives the batch up: a frame loses lines, nothing hangs.
+*   Each call is charged to the pass's budget (frame.a Spend), which may
+*   hand the tick back to the loop between calls.
 ********************************************************************
 AvgFlush            lda       #20
                     sta       FLSHN,u
@@ -227,6 +264,13 @@ af1                 pshs      b,x                 ,s = records left, 1,s = the n
                     tfr       u,d
                     puls      u
                     bcs       afx
+                    pshs      b                   the pass's budget: B records and a call
+                    lda       #RECUS
+                    mul
+                    addd      #CALLUS
+                    ldx       #MINBUS
+                    lbsr      Spend               (which may give the tick back here)
+                    puls      b
                     tstb
                     beq       af3                 none: the FIFO is full
                     pshs      b
@@ -246,8 +290,25 @@ af3                 dec       FLSHN,u
 af4                 puls      b,x
                     tstb
                     bne       af1
+                    bra       NxtBat
+afx                 puls      b,x
+                    bra       NxtBat
+
+* NxtBat - AVGPG+AV.RMAX, the next batch's size: the records the pass's
+*   budget still covers, (WORK - CALLUS) / RECUS, at least MINREC, at
+*   most 255.  U = the data area; A, B clobbered.
+NxtBat              ldd       WORK,u
+                    subd      #CALLUS
+                    blt       nb1
+                    lslb
+                    rola                          A = D / 128 (D < 32768)
+                    ldb       #RECK
+                    mul                           A = D / RECUS
+                    cmpa      #MINREC
+                    bhs       nb2
+nb1                 lda       #MINREC
+nb2                 sta       AVGPG+AV.RMAX,u
                     rts
-afx                 puls      b,x,pc
 
 ********************************************************************
 * ClutCommit - the colours that changed in colour RAM (CLRSHD, which

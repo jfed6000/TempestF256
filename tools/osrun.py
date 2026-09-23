@@ -7,14 +7,15 @@ with U = DP = the data area.  Each `os9` call (SWI2) is answered here: F$Sleep, 
 F$AllRAM, F$MapBlk, F$ClrBlk, F$DelRAM, F$Exit, I$Write, and the GetStat/SetStat codes the
 platform uses, the driver's side modelled from grfdrv256's register contracts: bitmaps in
 "physical" 8K blocks, SS.BmClear, SS.BmLine drawing its records with avgview's Bresenham, the
-CLUT, the layers, SS.LiveKeys from a script, SS.Tick from the cycle count.
+CLUT, the layers, SS.LiveKeys from a script.
 
 Time: the 6809 at 8 MHz, a tick every 133,333 cycles; F$Sleep X=2 runs the clock to the next
-tick.  An os9 call costs a fixed guess (grfdrv calls 400 us, SS.BmLine 474 us + 27.5 us a record,
+tick.  The frame loop sleeps once a pass and counts a tick a pass, so the run reports each pass's
+length and the ticks lost to passes that ran past their tick.  An os9 call costs a fixed guess (grfdrv calls 400 us, SS.BmLine 474 us + 27.5 us a record,
 others 150 us), so the frame times printed are estimates on the driver's side.  It proves the
 program's logic, never the hardware's timing.
 
-Checked as it runs, after every game frame (at the flip):
+Checked as it runs, after every game frame's drawing (DrwEnd):
   - the text bitmap against the text list drawn from scratch (text.a's incremental redraw);
   - the CLUT against colour RAM (gfx.a ClutCommit);
   - that the bitmap shown holds exactly the frame's line records.
@@ -46,9 +47,14 @@ F_EXIT, F_ICPT, F_SLEEP, F_TIME = 0x06, 0x09, 0x0A, 0x15
 F_ALLRAM, F_MAPBLK, F_CLRBLK, F_DELRAM = 0x39, 0x4F, 0x50, 0x51
 I_WRITE, I_GETSTT, I_SETSTT = 0x8A, 0x8D, 0x8E
 SS_OPT, SS_JOY, SS_ASCRN, SS_DSCRN, SS_FSCRN, SS_PSCRN = 0x00, 0x13, 0x8B, 0x8C, 0x8D, 0x8E
-SS_LIVEKEYS, SS_TICK, SS_CLUTWRITE, SS_MSDELTA = 0xC6, 0xC7, 0xCF, 0xD0
+SS_LIVEKEYS, SS_CLUTWRITE, SS_MSDELTA = 0xC6, 0xCF, 0xD0
 SS_WSIG, SS_BMBLK, SS_BMCLEAR, SS_BMLINE = 0xE1, 0xE4, 0xE5, 0xE7
-E_UNKSVC, E_ILLARG = 208, 187
+E_UNKSVC, E_ILLARG, E_DEVBSY = 208, 187, 250
+# The DMA engine (TinyVKY_DMA_Controller.v WAIT_2_TRF): a fill runs only in vertical blanking, at
+# once if armed before line 42 of the 525, else from the next line 0 (the tick); the CPU is halted
+# while it runs, 384 us 16-bit, 768 8-bit.  Wait mode 7 returns when it is done, 0 at once.
+LINE = TICK / 525
+DMA_WINDOW = 42
 
 
 def symbols():
@@ -83,7 +89,14 @@ class Host(CPU6809):
         self.errors = []
         self.mode = None
         self.ms_delta = False
-        self.has_tick = True
+        self.dma = None                     # a fill armed: [bitmap, start cycle, done cycle, halt charged]
+        self.dma_waited = 0                 # cycles spent in wait mode 7
+        self.woke = None                    # the loop's passes: when this one woke
+        self.woke_tick = 0
+        self.passes = []                    # cycles from waking to the next F$Sleep
+        self.lost = 0                       # ticks lost to passes that ran past their tick
+        self.pass_info = []                 # (cycles, logic?, records, glyphs, logic cycles)
+        self.pass_logic, self.pass_rec, self.pass_gly, self.pass_logcyc = False, 0, 0, 0
         self.cp = bytearray(32)             # the integer coprocessor (D8), as JR_Math_Block.v
         self.map_io(0xFEE0, 0xFEFF, self.cp_read, self.cp_write)
 
@@ -109,6 +122,13 @@ class Host(CPU6809):
 
     def cost(self, us):
         self.cycles += int(us * 8)
+
+    def dma_halt(self):
+        """a fill that has started by now halted the CPU for its length (charged once, lazily)"""
+        d = self.dma
+        if d and not d[3] and self.cycles >= d[1]:
+            self.cycles += d[2] - d[1]
+            d[3] = True
 
     # --- memory blocks ----------------------------------------------------------------------
     def block(self, b):
@@ -140,6 +160,7 @@ class Host(CPU6809):
             fn = self.mem[pc + 2]
             self.pc = (pc + 3) & 0xFFFF
             self.calls[fn] = self.calls.get(fn, 0) + 1
+            self.dma_halt()
             c0 = self.cycles
             err = self.os9(fn)
             self.oscycles += self.cycles - c0
@@ -160,11 +181,21 @@ class Host(CPU6809):
             n = self.x
             if n == 0:
                 raise Exit("F$Sleep 0: asleep for ever")
+            if n == 2 and self.woke is not None:    # a pass of the frame loop ends
+                self.passes.append(self.cycles - self.woke)
+                self.pass_info.append((self.cycles - self.woke, self.pass_logic, self.records - self.pass_rec,
+                                       self.pass_gly, self.pass_logcyc))
+                self.pass_logic, self.pass_rec, self.pass_gly, self.pass_logcyc = False, self.records, 0, 0
+                self.lost += self.tick - self.woke_tick   # ticks it ran past (each lost)
             if n > 1:                       # n - 1 tick interrupts: X = 2 wakes at the next tick
                 self.cycles = (self.tick + n - 1) * TICK
+            self.dma_halt()
+            if n == 2:
+                self.woke, self.woke_tick = self.cycles, self.tick
             return 0
         if fn == F_TIME:
-            self.mem[self.x:self.x + 6] = bytes([126, 9, 23, 12, 34, 56])
+            t = 12 * 3600 + 34 * 60 + 56 + self.cycles // HZ          # 12:34:56 at the start
+            self.mem[self.x:self.x + 6] = bytes([126, 9, 23, t // 3600 % 24, t // 60 % 60, t % 60])
             return 0
         if fn == F_ALLRAM:
             b = self.next_ram
@@ -196,6 +227,7 @@ class Host(CPU6809):
             return 0
         if fn == I_WRITE:
             self.written = bytes(self.mem[self.x:self.x + self.y])
+            self.output = getattr(self, "output", b"") + self.written
             return 0
         if fn in (I_GETSTT, I_SETSTT):
             return self.stat(fn == I_GETSTT, self.b)
@@ -213,11 +245,6 @@ class Host(CPU6809):
                 self.mode = (self.x, self.y)
             return 0
         if code == SS_WSIG and not get:
-            return 0
-        if code == SS_TICK and get:
-            if not self.has_tick:
-                return E_UNKSVC             # the driver as it is today
-            self.x = self.tick & 0xFFFF
             return 0
         if code == SS_LIVEKEYS and get:
             sense, keys = self.script(self.tick)
@@ -240,7 +267,23 @@ class Host(CPU6809):
         if code == SS_BMBLK and get:
             self.x = self.bm[n]
             return 0
+        if code == SS_BMCLEAR and get:
+            self.dma_halt()
+            self.x = 1 if self.dma and self.cycles < self.dma[2] else 0
+            self.y, self.u = 0x00BD, 0xDEAD         # the driver's diagnostic: the DMA's destination
+            return 0
         if code == SS_BMCLEAR and not get:
+            self.dma_halt()
+            if self.dma and self.cycles < self.dma[2]:
+                return E_DEVBSY
+            phase = self.cycles % TICK
+            start = self.cycles if phase < DMA_WINDOW * LINE else (self.tick + 1) * TICK
+            self.dma = [n, start, start + (384 if self.x & 0x100 else 768) * 8, False]
+            if (self.x >> 12) & 7 == 7:             # poll until done
+                c0 = self.cycles
+                self.cycles = max(self.cycles, start)
+                self.dma_halt()
+                self.dma_waited += self.cycles - c0
             for i in range(10):
                 self.block(self.bm[n] + i)[:] = bytes(8192)
                 self.sync_in(self.bm[n] + i)
@@ -263,6 +306,9 @@ class Host(CPU6809):
             cnt = self.u
             if not 1 <= cnt <= 255 or n > 2:
                 return E_ILLARG
+            self.dma_halt()
+            if self.dma and self.dma[0] == n and self.cycles < self.dma[2]:
+                self.errors.append("SS.BmLine into bitmap %d before its clear has run" % n)
             for i in range(cnt):
                 p = self.x + 8 * i
                 x0, x1 = self.rd16(p), self.rd16(p + 2)
@@ -384,9 +430,14 @@ GLYPHS = load_glyphs()
 KY_SHIFT, KY_LEFT, KY_RIGHT = 0x01, 0x20, 0x40
 
 
+QUIT_AT = None      # --quit S: press q at S seconds
+
+
 def script(tick):
     """Coin at 1 s, start at 3 s, then play: fire held on and off, the arrows by turns."""
     keys, sense = [], 0
+    if QUIT_AT is not None and tick >= QUIT_AT * 60:
+        keys.append(ord("q"))
     if 60 <= tick < 63:
         keys.append(ord("5"))
     if 180 <= tick < 190:
@@ -406,26 +457,28 @@ def main():
     ap.add_argument("--seconds", type=float, default=30)
     ap.add_argument("--png", help="write pictures here")
     ap.add_argument("--every", type=int, default=100, help="with --png, every n-th game frame")
-    ap.add_argument("--no-tick", action="store_true", help="a driver without SS.Tick (the fallback)")
+    ap.add_argument("--passes", action="store_true", help="break the passes down")
+    ap.add_argument("--quit", type=float, help="press q at this many seconds; print the sign-off")
     a = ap.parse_args()
+    global QUIT_AT
+    QUIT_AT = a.quit
     module = open(os.path.join(SRC, "tempest"), "rb").read()
     sym = symbols()
     h = Host(module, sym, script)
-    h.has_tick = not a.no_tick
     execoff = module[9] << 8 | module[10]
     h.u, h.dp, h.s = DATA, DATA >> 8, 0x2000
     h.x = h.y = 0x2000
     h.pc = MODBASE + execoff
     if a.png:
         os.makedirs(a.png, exist_ok=True)
-    gamfrm = MODBASE + sym["GamFrm"]
+    gamlog = MODBASE + sym["GamLog"]
+    drwend = MODBASE + sym["DrwEnd"]
     irq = MODBASE + sym["IRQ"]
     nirq = 0
-    avgrun = MODBASE + sym["AvgRun"]
-    txcommit = MODBASE + sym["TxCommit"]
-    ret = None                      # GamFrm's return address and S there
-    marks = {}
-    frames = []                     # per game frame: (total, game, avg incl. its flushes, text)
+    start = None
+    logret = None
+    txdraw = MODBASE + sym["TxDraw"]
+    frames = []                     # per game frame: its logic's start to its drawing's end, cycles
     end = int(a.seconds * HZ)
     status = "ran %.1f s" % a.seconds
     try:
@@ -433,49 +486,71 @@ def main():
             pc = h.pc
             if pc == irq:
                 nirq += 1
-            if pc == gamfrm:
-                ret = (h.rd16(h.s), h.s + 2)
-                marks = {"start": h.cycles}
-            elif ret and pc == avgrun:
-                marks["avg"] = h.cycles
-            elif ret and pc == txcommit:
-                marks["text"] = h.cycles
-            elif ret and pc == ret[0] and h.s == ret[1]:
-                t = h.cycles
-                frames.append((t - marks["start"], marks["avg"] - marks["start"],
-                               marks["text"] - marks["avg"], t - marks["text"]))
+            elif pc == gamlog:
+                start = h.cycles
+                h.pass_logic = True
+                logret = (h.rd16(h.s), h.s + 2)
+            elif pc == txdraw:
+                h.pass_gly += 1
+            elif logret and pc == logret[0] and h.s == logret[1]:
+                h.pass_logcyc = h.cycles - start
+                logret = None
+            elif pc == drwend and start is not None:
+                frames.append(h.cycles - start)
                 h.check()
-                n = len(frames)
-                if a.png and n % a.every == 0:
-                    h.picture(os.path.join(a.png, "frame%05d.png" % n))
-                ret = None
+                if a.png and len(frames) % a.every == 0:
+                    h.picture(os.path.join(a.png, "frame%05d.png" % len(frames)))
             h.step()
     except Exit as e:
         status = "exit: %s" % (e,)
+        if getattr(h, "output", None):
+            status += "; it wrote %r" % h.output
+    secs = max(h.cycles / HZ, 1e-9)
     print(status)
-    print("virtual IRQs %d (%.1f a second; the arcade's 246.1)" % (nirq, nirq / max(h.cycles / HZ, 1e-9)))
+    print("virtual IRQs %d (%.1f a second; the arcade's 246.1)" % (nirq, nirq / secs))
     print("ticks %d, game frames %d (%.1f a second), os9 calls %s" % (
-        h.tick, len(frames), len(frames) / max(h.cycles / HZ, 1e-9),
+        h.tick, len(frames), len(frames) / secs,
         ", ".join("$%02X x%d" % kv for kv in sorted(h.calls.items()))))
+
+    def pct(v, q):
+        v = sorted(v)
+        return v[min(len(v) - 1, int(q * len(v)))]
+    if h.passes:
+        ps = [p / 8000 for p in h.passes[60:]]          # after start-up
+        over = sum(1 for p in h.passes[60:] if p > TICK)
+        print("  passes %d: median %.1f ms, 95%% %.1f, 99%% %.1f, max %.1f; %d ran past their tick,"
+              " %d ticks lost" % (len(ps), pct(ps, .5), pct(ps, .95), pct(ps, .99), max(ps), over, h.lost))
+    if a.passes:
+        pi = h.pass_info[60:]
+        for name, sel in (("logic passes", lambda p: p[1]), ("drawing passes", lambda p: not p[1])):
+            v = [p for p in pi if sel(p)]
+            if not v:
+                continue
+            print("  %s %d: median %.1f ms, max %.1f; over the tick %d; records a pass median %d;"
+                  " logic median %.1f ms max %.1f" % (
+                      name, len(v), pct([p[0] / 8000 for p in v], .5), max(p[0] / 8000 for p in v),
+                      sum(1 for p in v if p[0] > TICK), pct([p[2] for p in v], .5),
+                      pct([p[4] / 8000 for p in v], .5), max(p[4] / 8000 for p in v)))
+        over = sorted((p for p in pi if p[0] > TICK), key=lambda p: -p[0])[:8]
+        for p in over:
+            print("    over: %.1f ms, logic %s (%.1f ms), %d records, %d glyphs" % (
+                p[0] / 8000, p[1], p[4] / 8000, p[2], p[3]))
     if frames:
-        def pct(v, q):
-            v = sorted(v)
-            return v[min(len(v) - 1, int(q * len(v)))]
-        for name, k in (("frame", 0), ("game (clear, EXSTAT, NONSTA, DISPLA)", 1),
-                        ("AvgRun with SS.BmLine, flip, CLUT", 2), ("text", 3)):
-            v = [f[k] / 8000 for f in frames]
-            print("  %-40s median %5.1f ms, 95%% %5.1f, max %5.1f" % (name, pct(v, .5), pct(v, .95), max(v)))
+        fs = [f / TICK for f in frames]
+        print("  a game frame, its logic to its drawing's end: median %.1f ticks, 95%% %.1f, max %.1f"
+              % (pct(fs, .5), pct(fs, .95), max(fs)))
         print("  line records %d (%.0f a frame)" % (h.records, h.records / len(frames)))
         ts = h.text_stats
         print("  texts a frame: median %d; changed entries: median %d, mean %.1f, frames with none %d%%"
               % (pct([t[0] for t in ts], .5), pct([t[1] for t in ts], .5),
                  sum(t[1] for t in ts) / len(ts), 100 * sum(1 for t in ts if not t[1]) // len(ts)))
+    print("  waiting for DMA fills (mode 7): %.1f s" % (h.dma_waited / HZ))
     if h.errors:
         print("%d problems:" % len(h.errors))
         for e in h.errors[:20]:
             print("  " + e)
         sys.exit(1)
-    print("checks: text bitmap, CLUT and line bitmap right after every game frame")
+    print("checks: text bitmap, CLUT and line bitmap right after every game frame's drawing")
 
 
 if __name__ == "__main__":

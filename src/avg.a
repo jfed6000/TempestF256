@@ -25,7 +25,9 @@ BMW	equ	320			the bitmap
 BMH	equ	240
 MAXJMP	equ	1024			control transfers before a list counts as a runaway
 MAXTXT	equ	256			text entries
-RBATCH	equ	255			records a batch (SS.BmLine's limit)
+	ifndef	RBATCH
+RBATCH	equ	255			records a batch, 1-255 (SS.BmLine's limit; the module sets fewer)
+	endc
 
 * The page (offsets; DP = AVGPG's page while AvgRun runs, U = its base in the main loop).
 AV.JT	equ	0			16: op*2 -> handler, built at entry (the module is PIC)
@@ -78,12 +80,15 @@ AV.CLON	equ	108			non-zero when bs >= 4 (the VCTR clamp is possible)
 AV.LEX	equ	109			2: the last record sent: its end's column
 AV.LEY	equ	111			its end's row
 AV.LCL	equ	112			its CLUT index (0: none yet; a record's is never 0)
+AV.RMAX	equ	113			records this batch holds: the caller's before AvgRun (0: RBATCH),
+*					and AvgFlush may change it for the next batch (1-255)
 
 * AvgRun - interpret the display list in window A once.
 * In: U = the data area (VWIN set; page-aligned).  Out: AVGPG+AV.TCNT texts at window A + $1800,
 * AVGPG+AV.END; records handed to AvgFlush in batches.  U and DP kept, the rest clobbered.
 * AvgFlush (the platform's) is called with X = the records, B = the count (1-255), U = the data
-* area, DP = its page; it may clobber everything but S.
+* area, DP = its page; it may clobber everything but S, and may set AVGPG+AV.RMAX (1-255), the
+* size of the batches from then on.
 AvgRun	pshs	u,dp
 	tfr	u,d
 	adda	#AVGPG/256
@@ -137,8 +142,11 @@ AvgRun	pshs	u,dp
 	sta	<AV.LCL
 	ldd	#MAXJMP
 	std	<AV.JMP
+	lda	<AV.RMAX		the first batch: the caller's size, or RBATCH
+	bne	_AI1
 	lda	#RBATCH
-	sta	<AV.RLFT
+	sta	<AV.RMAX
+_AI1	sta	<AV.RLFT
 	lbsr	AvSetQ
 	bsr	AvCtr
 	ldy	<AV.VRAM		PC = 0
@@ -597,7 +605,7 @@ _AS3	ldb	,y			Z in bits 7-5
 	lbra	AvZ
 
 * AvFlsh - hand the batch to AvgFlush, with the data area's U and DP.
-AvFlsh	lda	#RBATCH
+AvFlsh	lda	<AV.RMAX
 	suba	<AV.RLFT
 	beq	_AF1
 	tfr	a,b
@@ -612,7 +620,7 @@ AvFlsh	lda	#RBATCH
 	puls	y,u,dp
 	ldx	<AV.RBUF
 	stx	<AV.RPTR
-	lda	#RBATCH
+	lda	<AV.RMAX		the next batch's size (AvgFlush may have changed it)
 	sta	<AV.RLFT
 _AF1	rts
 

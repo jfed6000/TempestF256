@@ -57,6 +57,7 @@ tc0                 clr       ,x+
 tc2b                pshs      x
                     tfr       y,x
                     lbsr      TxDraw              the old entry in 0
+                    lbsr      TxSpnd
                     puls      x
 tc2a                leax      6,x
                     leay      6,y
@@ -88,6 +89,7 @@ tc4                 cmpd      AVGPG+AV.TCNT,u     every new entry
 tc5                 lda       1,x                 its colour
                     sta       TXCLR,u
                     lbsr      TxDraw
+                    lbsr      TxSpnd
 tc6                 leax      6,x
                     leay      6,y
                     puls      d
@@ -114,6 +116,20 @@ tc9                 lda       ,x+
                     bne       tc9
                     puls      u
 tcx                 rts
+
+* TxSpnd - X = an entry just drawn: its cost to the pass's budget (frame.a Spend),
+*   GLYUS and ROWUS a row.  All registers kept.
+*   The list in window A and TXOLD stay as they are while the loop runs:
+*   the game's next logic pass waits for this frame's drawing to end.
+TxSpnd              pshs      d,x,y
+                    lbsr      TxGlyph             its rows
+                    lda       GL.H,y
+                    ldb       #ROWUS
+                    mul
+                    addd      #GLYUS
+                    ldx       #GLYUS+11*ROWUS     room for the biggest next?
+                    lbsr      Spend
+                    puls      d,x,y,pc
 
 * TxSame - Z = 1 when the entries at X and Y are the same.  X, Y kept; D clobbered.
 TxSame              ldd       ,x
@@ -189,111 +205,134 @@ rbx                 rts
 ********************************************************************
 * TxDraw - X = an entry: its mask in TXCLR (0 erases, and marks the
 *   rows it touches).  X, Y, U kept.
+*
+*   The columns off the bitmap are the same on every row, so they are
+*   cut once: TXSKP pixels dropped on the left, TXPIX drawn.  The first
+*   visible row's place in the bitmap is worked out once (TxOff); each
+*   row after it is 320 bytes on, into the next 8K block when it passes
+*   one.  A row's pixels can cross a block boundary too (TxRun).
 ********************************************************************
 TxDraw              pshs      x,y
-                    bsr       TxGlyph             Y = the mask record
-                    ldb       GL.H,y
-                    beq       tdx                 a blank
-                    ldb       GL.X,y              the first column: column + x
-                    sex
-                    addd      2,x
-                    std       TXCOL,u
-                    ldb       GL.Y,y              the first row: row + y
-                    sex
-                    addd      4,x
-                    std       TXROW,u
+                    lbsr      TxGlyph             Y = the mask record
+                    lda       GL.H,y
+                    lbeq      tdx                 a blank
+                    sta       TXNR,u              rows left
                     leay      GL.ROWS,y
                     sty       TXGLY,u             the next row's bits
-                    lda       -GL.ROWS+GL.H,y
-                    pshs      a                   ,s = rows left
-                    lda       -GL.ROWS+GL.W,y
-                    pshs      a                   ,s = the width, 1,s rows left
-td1                 ldd       TXROW,u
+* the columns: first = column + x; skip the ones left of 0, cut the ones right of 319
+                    ldb       -GL.ROWS+GL.X,y
+                    sex
+                    addd      2,x
+                    clr       TXSKP,u
+                    tsta
+                    bpl       td2
+td1                 inc       TXSKP,u             left of column 0
+                    addd      #1
+                    bmi       td1
+td2                 std       TXCOL,u             the first column drawn
+                    ldb       -GL.ROWS+GL.W,y
+                    subb      TXSKP,u
+                    lbls      tdx                 all of it left of the bitmap
+                    stb       TXPIX,u
+                    ldd       TXCOL,u
+                    cmpd      #319
+                    lbhi      tdx                 all of it right of the bitmap
+                    addb      TXPIX,u             past column 320?
+                    adca      #0
+                    subd      #320
+                    bls       td3
+                    negb
+                    addb      TXPIX,u
+                    stb       TXPIX,u
+* the rows: first = row + y; skip the ones above 0
+td3                 ldb       -GL.ROWS+GL.Y,y
+                    sex
+                    addd      4,x
+td4                 tsta
+                    bpl       td5
+                    addd      #1                  above row 0
+                    ldx       TXGLY,u
+                    leax      1,x
+                    stx       TXGLY,u
+                    dec       TXNR,u
+                    bne       td4
+                    bra       tdx
+td5                 std       TXROW,u
                     cmpd      #239
-                    bhi       td4                 off the bitmap
-                    tst       TXCLR,u
-                    bne       td2
-                    lbsr      RowBit              erasing: mark the row
+                    bhi       tdx                 all of it below the bitmap
+                    lbsr      TxOff               X = the offset in the block, A = the block
+                    stx       TXROFS,u
+                    sta       TXBK,u
+td6                 tst       TXCLR,u
+                    bne       td7
+                    ldd       TXROW,u             erasing: mark the row
+                    lbsr      RowBit
                     ora       ,x
                     sta       ,x
-td2                 lbsr      TxLine               this row's pixels
-td4                 ldx       TXGLY,u
+td7                 lbsr      TxRun               this row
+                    ldx       TXGLY,u
                     leax      1,x
                     stx       TXGLY,u
                     ldd       TXROW,u
                     addd      #1
                     std       TXROW,u
-                    dec       1,s
-                    bne       td1
-                    leas      2,s
+                    cmpd      #239
+                    bhi       tdx                 the rest is below the bitmap
+                    ldd       TXROFS,u             the next row: 320 on
+                    addd      #320
+                    cmpd      #$2000
+                    blo       td8
+                    subd      #$2000
+                    inc       TXBK,u
+td8                 std       TXROFS,u
+                    dec       TXNR,u
+                    bne       td6
 tdx                 puls      x,y,pc
 
-* TxLine - one row of the mask: the bits at TXGLY, width ,s+2 (past
-*   the return), from column TXCOL on row TXROW (on the bitmap), in
-*   TXCLR.  The columns off the bitmap are dropped first; the rest are
-*   at most 8 pixels in a row of memory, which crosses a block boundary
-*   at most once.  X, Y kept.
-TxLine               pshs      x,y
-                    ldb       6,s                 the width
-                    lda       [TXGLY,u]           the bits, the leftmost in bit 7
-                    pshs      a,b                 ,s = bits, 1,s = pixels
-                    ldd       TXCOL,u
-                    bpl       tl2
-tl1                 lsl       ,s                  left of column 0: drop them
-                    addd      #1
-                    dec       1,s
-                    beq       tlx
-                    tsta
-                    bmi       tl1
-tl2                 cmpd      #319                right of column 319: nothing more
-                    bhi       tlx
-                    pshs      d                   ,s = the first column, 2,s bits, 3,s pixels
-                    addb      3,s                 the last column + 1: past 320?
-                    adca      #0
-                    subd      #320
-                    bls       tl3
-                    negb                          drop the ones past it
-                    addb      3,s
-                    stb       3,s
-tl3                 lbsr      TxOff               X = the offset in the block, A = the block
-                    leas      2,s
-                    pshs      x                   ,s = the offset, 2,s bits, 3,s pixels
+* TxRun - one row: the bits at TXGLY shifted past TXSKP, TXPIX pixels
+*   from block TXBK, offset TXROFS, in TXCLR
+TxRun               lda       [TXGLY,u]
+                    ldb       TXSKP,u
+                    beq       tr2
+tr1                 lsla
+                    decb
+                    bne       tr1
+tr2                 ldb       TXPIX,u
+                    pshs      a,b                 ,s = bits, 1,s = pixels left
+                    lda       TXBK,u
                     adda      TXBLK,u
-                    pshs      a                   ,s = the block, 1,s the offset
                     leax      SWIN,u
-                    lbsr      Map1                D = its logical address
-                    bcs       tl9
-                    tfr       d,y                 Y = the block's end
-                    leay      $2000,y
-                    addd      1,s
+                    lbsr      Map1                D = the block's logical address
+                    bcs       trx
+                    tfr       d,y
+                    leay      $2000,y             Y = its end
+                    addd      TXROFS,u
                     tfr       d,x                 X = the first pixel
                     lda       TXCLR,u
-tl5                 lsl       3,s
-                    bcc       tl6
+tr3                 lsl       ,s
+                    bcc       tr4
                     sta       ,x
-tl6                 leax      1,x
-                    dec       4,s
-                    beq       tl9
+tr4                 leax      1,x
+                    dec       1,s
+                    beq       trx
                     pshs      y                   at the block's end?
                     cmpx      ,s++
-                    blo       tl5
-                    pshs      a                   the next block
-                    lda       1,s
+                    blo       tr3
+                    pshs      a                   the row goes on in the next block
+                    lda       TXBK,u
                     inca
-                    sta       1,s
+                    adda      TXBLK,u
                     leax      SWIN,u
                     lbsr      Map1
                     tfr       d,x
                     tfr       d,y
                     leay      $2000,y
                     puls      a
-                    bcc       tl5
-tl9                 leas      3,s
-tlx                 leas      2,s
-                    puls      x,y,pc
+                    bcc       tr3
+trx                 puls      a,b,pc
 
-* TxOff - TXROW (0-239), ,s+2 = a column (0-319): X = the pixel's offset
-*   in its block, A = the block (0-9) in the bitmap
+* TxOff - TXROW (0-239), TXCOL (0-319): X = the pixel's offset in its
+*   block, A = the block (0-9) in the bitmap
 TxOff               ldb       TXROW+1,u           the row
                     lda       #5
                     mul                           D = row * 5
@@ -316,7 +355,7 @@ TxOff               ldb       TXROW+1,u           the row
                     lslb
                     rola
                     rol       ,s                  ,s:D = row * 320
-                    addd      3,s                 + the column
+                    addd      TXCOL,u             + the column
                     bcc       to1
                     inc       ,s
 to1                 pshs      a                   ,s = bits 15-8, 1,s = bits 23-16

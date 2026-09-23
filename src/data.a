@@ -9,7 +9,7 @@
 *   $0A00-$0B9D  RELTAB, reloc.a's tables
 *   $0C00-$0CFF  AVGPG, the AVG interpreter's page (avg.a)
 *   $0D00-       the platform's, below
-*   top          the stack, and OS-9's parameter copy above it
+*   $1C00-$1FFF  the stack (1K), and OS-9's parameter copy above it
 ********************************************************************
 
 DatBeg              rmb       $0D00               the game's and the interpreter's (port.d, arcade.d)
@@ -40,12 +40,20 @@ TXERS               rmb       1                   text.a: non-zero once this fra
 TXROW               rmb       2                   text.a: scratch
 TXCOL               rmb       2
 TXGLY               rmb       2
+TXROFS               rmb       2                   text.a: the row's offset in its block
+TXBK                rmb       1                   text.a: the row's block in the bitmap
+TXSKP               rmb       1                   text.a: pixels cut on the left
+TXPIX               rmb       1                   text.a: pixels drawn a row
+TXNR                rmb       1                   text.a: rows left
 FLSHN               rmb       1                   AvgFlush: tries left while the FIFO is full
 
 * the frame loop
-LASTTK              rmb       2                   SS.Tick's count at the last pass
-TICKOK              rmb       1                   non-zero: SS.Tick answers
-TICKGF              rmb       1                   a game frame ran since the last Ticks (the fallback)
+WORK                rmb       2                   this pass's budget left, estimated microseconds (Spend)
+DRAWNG              rmb       1                   non-zero: a frame's drawing is under way
+MAINSP              rmb       2                   the main loop's S while the drawing runs
+DRWSP               rmb       2                   the drawing's S while the loop runs
+DRWSTL              equ       384                 the drawing's stack, its size
+DRWSTK              rmb       DRWSTL              the drawing's stack (frame.a)
 VACC                rmb       2                   the virtual IRQ's Bresenham accumulator (frame.a)
 GFRAMS              rmb       2                   game frames run
 PAUSED              rmb       1                   non-zero = our terminal is a shadow (SS.WSig S$WinBg)
@@ -64,8 +72,11 @@ OPTSAV              rmb       32                  path 0's options as found (Cle
 OPTNEW              rmb       32                  the same, with echo and the signal characters off
 OPTOK               rmb       1                   OPTSAV holds a real packet
 TIMBUF              rmb       6                   F$Time's packet (the RANDOM seed)
+T0BUF               rmb       6                   F$Time at the first pass (the sign-off's numbers)
+PASSES              rmb       2                   passes of the frame loop (one a tick, if none ran long)
+STLINE              rmb       48                  the sign-off's numbers, as text
 
-StkBase             equ       $1800               the stack: the top 2K, with OS-9's parameters
+StkBase             equ       $1C00               the stack: the top 1K (as Joust), with OS-9's parameters
                     ifgt      .-StkBase
                     error     data area overflow
                     endc
