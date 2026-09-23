@@ -201,6 +201,14 @@ anything was known) that is a fail, but it has two readings, and **which one is 
 The screen decides it: every one of the 240 rows striped full width, rows 0-14 drawn twice, means the
 first reading. Stage 1's `D` key measures the drain directly.
 
+**The screen (user's capture, same day, after `H`/`S`): all 240 rows are striped full width** in the
+15-colour cycle, so the lines were drawn, not dropped wholesale — **the first reading, provisionally.**
+But the stripes carry **scattered single pixels of the wrong colour**, in loose vertical columns, all the
+way down. Unexplained, and not yet attributable: they could be pixels lost from the FIFO letting earlier
+content show through, pixels landing at the wrong address, or the capture path (this rig has faked
+faults before). The next run separates them: `C` (clear) then `F` on a known background, photographed
+directly, twice.
+
 What else nobody has measured, and what the plan's first hardware stage measures:
 
 | Number | Why it decides something | Estimate, unchecked |
