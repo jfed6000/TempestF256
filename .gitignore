@@ -25,3 +25,6 @@ __pycache__/
 
 # The translator's output (tools/m65to09.py writes it; regenerable)
 /xlat/
+
+# Host builds of src/ (tools/xlattest.py --src assembles src/tempest.a here)
+/src/build/

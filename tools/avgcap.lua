@@ -94,6 +94,33 @@ if tfile then
     end
   end)
 end
+-- Optional: game states (AVGCAP_RAM=file, AVGCAP_RAMEVERY=n, default 1): at the start of every n-th
+-- game frame - MAINLN's "STA FRTIMR" zeroing the frame timer, just before JSR EXSTAT - the 6502's
+-- 2K of RAM, the 4K of vector RAM and the switches it reads, for tools/xlattest.py --states.  One
+-- record a frame:
+--   "RAMG"  4 bytes  magic
+--   frame   4 bytes  big-endian game-frame count (from 1)
+--   RAM     2048 bytes  $0000-$07FF
+--   vector RAM  4096 bytes  $2000-$2FFF
+--   switches  8 bytes  IN0 $0C00, DSW1 $0D00, DSW2 $0E00, the POKEYs' ALLPOT $60C8 and $60D8, 0,0,0
+--             (the switches are active low: a rig answering 0 would find the test switch on)
+local rfile = os.getenv("AVGCAP_RAM") and assert(io.open(os.getenv("AVGCAP_RAM"), "wb"))
+local revery = tonumber(os.getenv("AVGCAP_RAMEVERY") or "1")
+local gframes = 0
+if rfile then
+  taps[#taps + 1] = space:install_write_tap(FRTIMR, FRTIMR, "ram_w", function(off, data, mask)
+    -- MAINLN's zeroing store, not the IRQ's increments: PC is past "STA FRTIMR" (85 53), which
+    -- follows the wait loop at $C7A7
+    if data ~= 0 or pc.value < 0xC7A7 or pc.value > 0xC7B3 then return end
+    gframes = gframes + 1
+    if gframes % revery == 0 then
+      local ram = block(0, 0x800):sub(1, FRTIMR) .. string.char(0) .. block(FRTIMR + 1, 0x800 - FRTIMR - 1)
+      local sw = string.char(space:read_u8(0x0C00), space:read_u8(0x0D00), space:read_u8(0x0E00),
+                             space:read_u8(0x60C8), space:read_u8(0x60D8), 0, 0, 0)
+      rfile:write("RAMG", be32(gframes), ram, block(0x2000, 4096), sw)
+    end
+  end)
+end
 -- Optional: every POKEY write (AVGCAP_POKEY=file): video frame, machine time ms, register, value.
 if pfile then
   taps[#taps + 1] = space:install_write_tap(0x60C0, 0x60DF, "pokey_w", function(off, data, mask)
@@ -121,4 +148,5 @@ stopsub = emu.add_machine_stop_notifier(function()
   f:close()
   if tfile then tfile:close() end
   if pfile then pfile:close() end
+  if rfile then rfile:close() end
 end)

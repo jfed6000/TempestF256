@@ -1,11 +1,13 @@
 # Tempest for NitrOS-9 Level 2 on Wildbits F256: status
 
-**2026-09-23.** Stage 0 complete; the D6 pilot done and approved (model B and its conventions).
-**D6 step 1 is done and reviewed** (section "D6 step 1: the translator" below; decisions there):
-`tools/m65to09.py` translates the whole game into a first draft (`xlat/`, 28,013 bytes, code ratio
-1.35), and 169 of the 190 called routines are byte-exact against Atari's ROM on random in-domain
-states; the 4 failures are at sites the translator marks for hand work. Nothing is hand-finished,
-nothing has run on hardware.
+**2026-09-23.** Stage 0 complete; the D6 pilot done and approved (model B and its conventions);
+D6 step 1 (the translator, `xlat/`) done and reviewed. **The D6 hand work is done, for review**
+(section "D6 hand work" below): the game, hand-finished in `src/` (28,352 bytes), has WORSCR and
+CASCAL on the coprocessor, start-up relocation of its address tables, the flag, BIT and decimal
+sites, and COIN65 in 6809. **All 2,417 game frames recorded from MAME (a played game and attract)
+run byte-exact against Atari's ROM**, as do the named tests with the code, data area and window all
+moved. What is left of the HAND markers is the platform layer's: hardware registers and the IRQ.
+Nothing has run on hardware.
 
 ## Decisions so far
 
@@ -478,11 +480,192 @@ is thin where routines work through relocated pointers (the messages) until relo
 3. Whether to extend the test with **recorded game states** (MAME's RAM at frame boundaries, from
    `avgcap.lua`) so that routines run on states the game really produces.
 
+## D6 hand work (2026-09-23, host only) — for review
+
+The approved order, each piece re-tested against Atari's ROM before the next. `src/` began as a copy
+of the draft (`xlat/`, untouched and still regenerable) and is where the game is now finished by
+hand; each file's first line says so. Nothing has run on hardware.
+
+### How `src/` is tested
+
+- **`tools/xlattest.py --src`** assembles `src/tempest.a` into `src/build/` (gitignored) and runs
+  the named tests, the fuzz (`--fuzz`) or the recorded game frames (`--states`) on it. Without
+  `--src` it tests the draft as before.
+- **The named tests move everything.** With `--src` each routine runs with the code at $8000 and
+  $8321, the data area at $1000 and $5300 and window A at $4000 and $6000, so a missed relocation
+  shows. Each test names the routine's pointers, and a mapper carries their values between the
+  arcade's addresses and the port's (RAM to the data area, vector RAM to the window, reloc.a's
+  tables to their copies, ROM data to the module). The fuzz cannot do this: in random RAM a word
+  may be a pointer or two scalars (TEMP3/TEMP4 are both, by turns).
+- **One set of domain rules** for the fuzz and the named tests (`domain_checks`): a case the game
+  cannot produce is skipped, not compared. Added this session: an index carrying a RAM table's
+  access past $7FF; each relocated table a stretch of its own, which an index may not carry a read
+  into; a data read of the top ROM's mirror ($F000-$FFFF); a `(zp),Y` access after an `INY` has
+  wrapped Y, before Y is loaded again (below); `NUMPLA` 0 or 1; `UPSCLI`'s scale and player 0 or 1;
+  COIN65's table at $CFD9 as data.
+- **The translator's `INY` folding, measured.** It folds `INY`s into the next `(zp),Y` access's
+  offset (`sta 1,x`), which is wrong if Y wraps from $FF to 0 in between. **Y does wrap in the real
+  game** (1,621 times in the recorded frames, at `ALDIS2:3029`, `3158`, `3191`, `3206`, all at the
+  end of a list block), **but in all 2,417 frames no `(zp),Y` access follows a wrap before Y is
+  loaded again**. So the recorded frames confirm the folding, and the fuzz treats a random state
+  that does this (a list offset of $FF) as outside the domain.
+
+### 1. WORSCR and CASCAL on the coprocessor
+
+**WORSCR** is the pilot's (`pilot/worscr.a`): its two Math Box divides are `DIVQ`.
+
+**CASCAL** (`ALDIS2:1444`) asks the Math Box for `SZXD` with N = 24, dividend YDEUNI×256, divisor
+Δy = PYL − EY (16 bits, signed). Run exhaustively in C against MAME's model over all 16.7 million
+(YDEUNI, Δy) pairs, it is **the low 16 bits of floor(YDEUNI × 65536 / |Δy|), negated when Δy < 0**,
+except where its 16-bit registers overflow: |Δy| ≤ 53 (and YDEUNI ≥ $80). Objects do come that near
+the eye, in the dive down the tube, so the port reproduces both:
+
+- `DIVF`, the fast path: two coprocessor divides, the second (the remainder × 256) done a bit at a
+  time when the first remainder is 256 or more. Exact for YDEUNI < $80 and |Δy| ≥ 1 that is ≥ 54 or
+  ≥ YDEUNI, which is **all of steady play** (there |Δy| ≥ YDEUNI, since PYL ≥ $10 and
+  YDEUNI = $10 − EY).
+- `MBDV24` everywhere else: MAME's own 25-step loop, overflow and all, in 6809.
+
+Both paths were checked in C against MAME's model over every input they take (0 wrong of 8.4
+million each), then on the 6809 by the differential test, with every path forced.
+
+| | 6502 cycles (mean) | 6809 cycles |
+|---|---:|---:|
+| WORSCR | 198 | 290 |
+| CASCAL, in play | 135 (+ the Math Box's time, which MAME does not model) | 352 median, 391 max |
+| CASCAL, far objects (a wave's start: the bit-at-a-time second step) | | ~700 |
+| CASCAL, nearer than YDEUNI (the dive: `MBDV24`) | | ~1,400 |
+
+`DIVF` reads the coprocessor's remainder (`CP.REM`, $FEF6), which `JR_Math_Block.v` says is right
+from rc14 on. **Unchecked on hardware**, like the divide's latency (D6 pilot, "Unchecked").
+
+### 2. Start-up relocation
+
+**`src/reloc.a`**, Joust's `reloc.a` way: each table's relocation source stays in the module in the
+table's own place and size (so nothing around it moves), and `RELINI` copies it at start-up to the
+data area from $A00 (`R.xxx` in `port.d`, 414 bytes to $B9D), adding the module's address (M), the
+data area's (D) or window A's less $2000 (W). It writes the copies little-endian, as the translated
+code reads them a byte at a time.
+
+| Table | Words | Kind | Readers changed |
+|---|---:|---|---|
+| `BUFASL`, `BUFBSL`, `BUFSWL` (`ALVROM:2017-2049`; `BFASTA`, `BFBSTA` inside) | 27 | W | SBCLOG, SBCACT, SBCSWI, BIGTEX, WHICHB |
+| `LNGTAB` (`ALLANG:253`) | 4 | D, to the copies below | INILIT |
+| `ENGMSG`, `FREMSG`, `GERMSG`, `SPAMSG`: the message addresses | 120 | M | (read through `LITRAL`) |
+| `WTABLE` (`ALWELG:728`): a skill table and the variable it sets | 28 × 2 | M, D | CONTOUR |
+
+The message tables were not among the translator's HAND sites: the `MESS` macro builds them, so
+they came out as plain bytes. **Pointer constants**: `ALSCO2:101` (INDYLO = HSCORL+23, a RAM
+address: + the data area's page) and `ALSCO2:208` (INDYHI = 0, zero page: the data area's page).
+**Not addresses after all**: `BONPTM` (bonus points) and `ALDIS2:1033` (a `.WORD` of its own
+location inside a byte table, read as data); `ROTFLG`'s $2C (`ALDIS2:2502`) is only a flag. **The
+18 vector-RAM-absolute sites**: each offset from `VWIN` checked against its symbol; all right.
+
+Found on the way:
+
+- **ZATC4V (`ALSCO2:105`) is anti-tamper** that `docs/port-tempest.md` §2.4 does not list: it XORs
+  the 6502 code calling the ATARI message (`ZATC4S`) into `QT2`. The port's code there is 6809, so
+  the check failed (`QT2` = $F9 instead of 0). **Neutralised** to its passing result (A = 0,
+  Y = $FF, `QT2` = 0). The fuzz had hidden it, since a case reading code as data is skipped. `QT2`'s
+  consumer is `ZQAT4C` (`ALEXEC:262`), whose `SED` the translator already neutralises.
+- **A cross-file distance.** The draft reaches `MSGLBS` (ALLANG) as `ANITAB+509` (ALVROM),
+  because `MSGLBS` has no label of its own in the module. That holds only while ALCOIN, linked
+  between the two, keeps its 6502 size. Translating ALCOIN broke it, and the recorded game frames
+  caught it at once (wrong message colours). `MSGLBS` is now a label. A scan finds no other
+  cross-file offsets.
+
+### 3. Flags, BIT, decimal, COIN65
+
+- **`BIT WFUSCH`** (`ALWELG:2129`, `2149`; V and Z read) and **`BIT QSTATUS`** (`ALWELG:3112`,
+  `ALEXEC:448`; N and Z): the 6502's BIT exactly for the flags read. V is bit 6 (or N bit 7) of
+  memory, and Z is A AND memory.
+- **Decimal `SBC`**: PRORAT's seconds (`ALWELG:208`, `SBC #1`) and UPSCOR's bonus-interval
+  division (`ALEXEC:570`, `SBC BLIFIN` in a loop). A binary subtract sets N, Z and C as the NMOS
+  6502 does in decimal mode, then −6 and −$60 make the digits BCD. Exact for BCD digits (non-BCD is
+  outside the domain, as before).
+- **GETOP3** (a stub; `ALTES2:632`, in the self-test the port drops): option bank 3 through the
+  POKEYs' pot ports, into shadows. INILIT, INICHK and GAMSTA, which failed on the stub, now pass.
+- **ALCOIN = COIN65 with Tempest's options** (BONADD=1, CNTINT=0, COIN=0, COIN01=1, SLAM=0, three
+  mechs, three counters). COIN65 is mostly assembly-time conditionals, so the 6809 follows the Rev 3
+  ROM's bytes ($CF24-$D030), each line marked with its address: 307 bytes against 269. Tested with
+  2,000 random states and **20,000 interrupts of coins dropped** on the three mechs (switches closed
+  for 20-40 ms, the odd slam, the coin mode changed now and then), compared at every interrupt;
+  credits accrue as they should.
+- The V "needed" after `JSR MOOLAH` (`ALHAR2:147`) is the IRQ's, which the platform rewrites; after
+  `JSR GETOP3` nothing reads it.
+
+### 4. Recorded game states
+
+`tools/avgcap.lua` gained `AVGCAP_RAM`: at the start of every n-th game frame (MAINLN's
+`STA FRTIMR` at $C7AF, just before `JSR EXSTAT`), MAME's 2K of RAM, the 4K of vector RAM and the
+switches (IN0, both option banks, both POKEYs' ALLPOT). **The switches matter**: they are active
+low, and a rig answering 0 has the test switch on, so the game walks into its self-test.
+`xlattest.py --src --states FILE...` runs **whole game frames**: EXSTAT, NONSTA and DISPLA in turn
+on both CPUs, each from the 6502's result of the last, everything compared after each.
+
+Captured (MAME unmodified, `captures/`, regenerable): **300 s of the scripted played game** (every
+5th frame: 1,623 states across play, pause, new life, end of wave, the high-score states and the
+bonus) and **150 s of attract** (794 states: the demo, the logo, the text screens). From
+`captures/`:
+
+    AVGCAP_OUT=/dev/null AVGCAP_EVERY=0 AVGCAP_PLAY=1 AVGCAP_RAM=states_play.bin AVGCAP_RAMEVERY=5 \
+      /usr/games/mame tempest -rompath ../tempest_orig/notebooks/roms -autoboot_script ../tools/avgcap.lua \
+      -nothrottle -seconds_to_run 300 -video none -sound none
+
+and the same without `AVGCAP_PLAY` into `states_attract.bin` for 150 s (about 30 s and 15 s).
+
+**Result: all 2,417 game frames are byte-exact after each of the three calls.** Per frame, the
+6502 averages 30,601 cycles and the 6809 60,020 (ratio 1.96): **7.5 ms of the 36.6 ms frame at
+8 MHz**, inside the pilot's 6-8 ms estimate, before the interpreter and `SS.BmLine`.
+
+These run with the data area and the window at the arcade's places: a real state's pointers are
+not all known (the named tests are where things move). `LITRAL` is mapped. The other pointers
+compare equal, or equal once mapped back. That includes a leftover page: after CONTOUR, TEMP4 still
+holds a skill table's page while TEMP3 has since been used as a scalar.
+
+### Results (the final tools, `src/`)
+
+| Test | Result |
+|---|---|
+| Recorded game frames (`--states`, both captures) | **2,417 byte-exact**, after each of EXSTAT, NONSTA, DISPLA |
+| Named tests (`--src`, 1,000 cases each, everything moved) | **21 routines, all byte-exact**: 1,000 cases each (in the domain: PRORAT 705, INFO 42, which the recorded frames cover), MOOLAH also 20,000 interrupts |
+| The fuzz (`--src --fuzz`, 30 random cases a routine) | **176 of 190 pass, none fail**; 14 have no in-domain random case (they work through relocated pointers). The recorded frames run 13 of them, most hundreds of times; **`PL1RNK` is run by neither** (untested) |
+| The draft (`xlattest.py`) and the pilot (`d6pilot.py`) | unchanged: all pass |
+
+### The module
+
+**28,352 bytes** (the draft 28,013): WORSCR with CASCAL's divides 377 bytes (was 252), COIN65 307
+(was 269), `reloc.a` 122, GETOP3 27. The data area now needs up to $B9D for the relocated tables,
+before the stack and the platform's variables.
+
+**HAND markers left: 78**, all the platform layer's: 69 hardware registers (the shadows `HW_xxxx`,
+the approved seams), ALHAR2's IRQ (`SEI`, `CLI`, `RTI`, `TSX`, `BRK`, MOOLAH's V), the RESET stub and
+the self-test's two dispatch entries (`DSPSYS` in DROUTAD, ALTES2's $D7E1 in ROUTAD).
+
+### Harness changes (tools)
+
+`xlattest.py`: `--src`, `--states`/`--every`/`--limit`, the relocated named layouts with per-routine
+pointers (big-endian, little-endian, swapped, soft), `Mapper`, `domain_checks` shared, generators
+for CASCAL, the relocation users, UPSCOR (BCD scores near a 10K boundary), PRORAT, MOOLAH and the
+coin sequence. `d6pilot.py`: `Rig.case` takes registers to skip (BIGTEX and DSBOOM leave a pointer's
+high byte in A or Y) and an `accept` hook. `avgcap.lua`: `AVGCAP_RAM`, `AVGCAP_RAMEVERY`.
+
+### For review
+
+1. **ZATC4V neutralised** (anti-tamper, not in `port-tempest.md` §2.4's list; added there now).
+2. **CASCAL's exact overflow path** (`MBDV24`, ~1,400 cycles, only for objects nearer the eye than
+   YDEUNI, as in the dive) against the formula there (fewer cycles, a different scale for those
+   objects than the arcade's). Recommendation: keep it exact; the dive is short.
+3. **The data area** now runs to $B9D (the relocated tables); the platform layer's layout starts
+   from there.
+4. Next, by the plan: the platform layer (the hardware seams, the IRQ as the frame loop, the module
+   header and `make pic`), for which the SS calls are proposed first.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
 2. `tline` for stage 1, when the core is fixed: above all the per-record cost.
-3. **The hand work** the translator lists, in the approved order (D6 step 1, "Decisions"), and the
-   recorded-state test.
+3. **The D6 hand work's review** (section "D6 hand work", "For review").
 4. `SS.MsDelta` storage (5 bytes of vtio statics, 242 → 247 of 256).
-5. The coprocessor divide's read-after-write timing on hardware (D6 pilot, "Unchecked").
+5. The coprocessor divide's read-after-write timing, and its remainder, on hardware (D6 pilot,
+   "Unchecked"; `DIVF` reads the remainder).

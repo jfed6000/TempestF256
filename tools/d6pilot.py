@@ -164,7 +164,8 @@ class Rig:
                                      (off, cyc, want, line))
             self.checked.add(off)
 
-    def case(self, entry6502, entry6809, arcade, vram, a, x, y, pokey_io, compare_skip=()):
+    def case(self, entry6502, entry6809, arcade, vram, a, x, y, pokey_io, compare_skip=(),
+             skip_regs="", accept=None):
         ref = self.ref
         ref.mem[0:0x800] = arcade
         ref.mem[0x2000:0x3000] = vram
@@ -182,7 +183,7 @@ class Rig:
             for i in range(0x800):
                 if i in PSEUDO or i in STACK6502 or i in compare_skip:
                     continue
-                if mem[i] != want[0][i]:
+                if mem[i] != want[0][i] and not (accept and accept(c, i, want[0])):
                     diffs.append("RAM $%03X: 6809 %02X, 6502 %02X" % (i, mem[i], want[0][i]))
             for i in range(0x1000):
                 if vr[i] != want[1][i]:
@@ -191,7 +192,7 @@ class Rig:
                 if pk[i] != want[2][i]:
                     diffs.append("POKEY image %d: 6809 %02X, 6502 %02X" % (i, pk[i], want[2][i]))
             for n, g, w_ in zip("AXY", regs, want[3]):
-                if g != w_:
+                if g != w_ and n not in skip_regs:
                     diffs.append("register %s: 6809 %02X, 6502 %02X" % (n, g, w_))
             if diffs:
                 return cyc65, None, diffs, c.cfg

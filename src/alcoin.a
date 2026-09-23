@@ -1,0 +1,165 @@
+* alcoin.a - ALCOIN.MAC: COIN65.MAC (Atari's coin routine) with Tempest's options (BONADD=1,
+* CNTINT=0, COIN=0, COIN01=1, SLAM=0, MECHS=3, EMCTRS=3), by hand in model B.  COIN65 is mostly
+* assembly-time conditionals, so this follows the Rev 3 ROM's bytes ($CF24-$D030), each line
+* marked with the address it comes from.  Byte-exact against the ROM (tools/xlattest.py MOOLAH).
+*
+* Called once an interrupt (4 ms on the arcade).  $COINA (= $LAM, $TEST) is the switch byte the
+* IRQ copies in: the mechs' coin switches in bits 2, 1, 0 (left, middle, right), slam in bit 3.
+* The 6502's flags at the RTS are not kept: the caller (the IRQ, the platform's on the port)
+* reads none.
+
+MOOLAH	ldb	#$02			CF24 LDX #2: each mech, right to left
+	stb	<RX
+_CN1	ldy	<RXP			data base + X
+	lda	<_SCOINA		CF26 $DETCT: LDA $COINA
+	ldb	<RX			CF29 CPX #1
+	cmpb	#$01
+	beq	_CN2			CF2B BEQ: the middle mech, two shifts
+	bhi	_CN3			CF2D BCS: the right, one
+	lsra				CF2F LSR: the left, three
+_CN2	lsra				CF30 LSR
+_CN3	lsra				CF31 LSR: C = this mech's switch
+	lda	_SCNSTT,y		CF32 LDA $CNSTT,X (C kept)
+	anda	#$1F			CF34 AND I,1F
+	bcs	_CN8			CF36 BCS: the switch is closed
+	beq	_CN5			CF38 BEQ
+	cmpa	#$1B			CF3A CMP I,1B
+	bhs	_CN4			CF3C BCS
+	sta	<RY			CF3E TAY
+	lda	<_SINTCT		CF3F LDA $INTCT
+	anda	#$07			CF41 AND I,7
+	cmpa	#$07			CF43 CMP I,7
+	lda	<RY			CF45 TYA
+	blo	_CN5			CF46 BCC
+_CN4	deca				CF48 SBC I,1 (C is set on both ways here)
+_CN5	sta	_SCNSTT,y		CF4A STA $CNSTT,X
+	lda	<_SLAM			CF4C LDA $LAM
+	anda	#$08			CF4F AND I,$LMBIT
+	bne	_CN6			CF51 BNE
+	lda	#$F0			CF53 LDA I,0F0: slammed
+	sta	<_SLMTIM		CF55 STA $LMTIM
+_CN6	lda	<_SLMTIM		CF57 LDA $LMTIM
+	beq	_CN7			CF59 BEQ
+	dec	<_SLMTIM		CF5B DEC $LMTIM
+	clra				CF5D LDA I,0
+	sta	_SCNSTT,y		CF5F STA $CNSTT,X
+	sta	_SPSTSL,y		CF61 STA $PSTSL,X
+_CN7	lda	_SPSTSL,y		CF63 CLC / CF64 LDA $PSTSL,X
+	beq	_CNNX			CF66 BEQ: C clear, so CF8B's BCC goes on to the next mech
+	dec	_SPSTSL,y		CF68 DEC $PSTSL,X
+	bne	_CNNX			CF6A BNE (likewise)
+	bra	_CNCOIN			CF6C SEC / CF6D BCS / CF8B: a coin
+_CN8	cmpa	#$1B			CF6F CMP I,1B
+	bhs	_CN10			CF71 BCS
+	lda	_SCNSTT,y		CF73 LDA $CNSTT,X
+	adda	#$20			CF75 ADC I,20 (C clear)
+	bcc	_CN5			CF77 BCC
+	beq	_CN10			CF79 BEQ (C set)
+	lda	#$1F			CF7B CLC / CF7C LDA I,1F: C clear, so CF7E's BCS falls through
+	sta	_SCNSTT,y		CF80 STA $CNSTT,X
+	ldb	_SPSTSL,y		CF82 LDA $PSTSL,X / CF84 BEQ / CF86 SEC: C = it was not 0
+	lda	#$78			CF87 LDA I,78
+	sta	_SPSTSL,y		CF89 STA $PSTSL,X
+	tstb
+	beq	_CNNX			CF8B BCC
+	bra	_CNCOIN
+_CN10	lda	#$1F			CF7C LDA I,1F with C set: CF7E BCS
+	bra	_CN5
+_CNCOIN	clra				CF8D LDA I,0: one unit (the left mech)
+	ldb	<RX			CF8F CPX I,1
+	cmpb	#$01
+	blo	_CN13			CF91 BCC
+	beq	_CN12			CF93 BEQ
+	lda	<_SCMODE		CF95 LDA $CMODE: the right mech, 1, 4, 5 or 6 units
+	anda	#$0C			CF97 AND I,0C
+	lsra				CF99 LSR
+	lsra				CF9A LSR (C clear: bit 0 of the AND)
+	beq	_CN13			CF9B BEQ
+	adda	#$02			CF9D ADC I,2
+	bra	_CN13			CF9F BNE (always)
+_CN12	lda	<_SCMODE		CFA1 LDA $CMODE: the middle mech, 1 or 2 units
+	anda	#$10			CFA3 AND I,10
+	beq	_CN13			CFA5 BEQ
+	lda	#$01			CFA7 LDA I,1
+_CN13	pshs	a			CFA9 SEC / CFAA PHA
+	adda	<_SBCCNT		CFAB ADC $BCCNT (+1: the SEC)
+	inca
+	sta	<_SBCCNT		CFAD STA $BCCNT
+	puls	a			CFAF PLA
+	adda	<_SCNCT			CFB0 SEC / CFB1 ADC $CNCT
+	inca
+	sta	<_SCNCT			CFB3 STA $CNCT
+	inc	_SCCTIM,y		CFB5 INC $CCTIM,X: pulse the counter
+_CNNX	dec	<RX			CFB7 DEX
+	lbpl	_CN1			CFB8 BMI / CFBA JMP $DETCT
+	lda	<_SCMODE		CFBD LDA $CMODE: the bonus adder
+	lsra				CFBF LSR (x5: the mode, 0-7)
+	lsra
+	lsra
+	lsra
+	lsra
+	sta	<RY			CFC4 TAY
+	tfr	a,b
+	leax	BONTAB,pcr
+	lda	<_SBCCNT		CFC5 LDA $BCCNT
+	suba	b,x			CFC7 SEC / CFC8 SBC Y,BONTAB
+	bmi	_CN15			CFCB BMI
+	sta	<_SBCCNT		CFCD STA $BCCNT
+	inc	<_SBC			CFCF INC $BC
+	ldb	<RY			CFD1 CPY I,3
+	cmpb	#$03
+	bne	_CN15			CFD3 BNE
+	inc	<_SBC			CFD5 INC $BC / CFD7 BNE: the ROM would run its table as code were
+*					$BC to wrap to 0 here, which two bonus coins at $FE cannot be in play
+_CN15	lda	<_SCMODE		CFE1 LDA $CMODE: coins to credits
+	anda	#$03			CFE3 AND I,3
+	sta	<RY			CFE5 TAY
+	beq	_CN17			CFE6 BEQ: free play (CNCT = 0)
+	lsra				CFE8 LSR
+	adca	#$00			CFE9 ADC I,0: coins a credit, 1, 1, 2 (modes 1, 2, 3)
+	pshs	a			CFEB EOR I,0FF / CFED SEC / CFEE ADC $CNCT: CNCT less that
+	lda	<_SCNCT
+	suba	,s+
+	bcc	_CN16			CFF0 BCS: enough coins
+	adda	<_SBC			CFF2 ADC $BC (C clear)
+	bmi	_CN18			CFF4 BMI
+	sta	<_SBC			CFF6 STA $BC
+	clra				CFF8 LDA I,0
+_CN16	ldb	<RY			CFFA CPY I,2
+	cmpb	#$02
+	bhs	_CN165			CFFC BCS
+	inc	<_S_SCRDT		CFFE INC $$CRDT: mode 1, two plays a coin
+_CN165	inc	<_S_SCRDT		D000 INC $$CRDT
+_CN17	sta	<_SCNCT			D002 STA $CNCT
+_CN18	lda	<_SINTCT		D004 LDA $INTCT: the counters, on even interrupts
+	lsra				D006 LSR
+	bcs	_CNX			D007 BCS
+	clr	<RY			D009 LDY I,0
+	ldb	#$02			D00B LDX I,2
+	stb	<RX
+_CN19	ldy	<RXP
+	lda	_SCCTIM,y		D00D LDA $CCTIM,X
+	beq	_CN20			D00F BEQ
+	cmpa	#$10			D011 CMP I,10
+	blo	_CN20			D013 BCC
+	adda	#$F0			D015 ADC I,0EF (C set): less $10
+	inc	<RY			D017 INY
+	sta	_SCCTIM,y		D018 STA $CCTIM,X
+_CN20	dec	<RX			D01A DEX
+	bpl	_CN19			D01B BPL
+	lda	<RY			D01D TYA
+	bne	_CNX			D01E BNE
+	ldb	#$02			D020 LDX I,2
+	stb	<RX
+_CN21	ldy	<RXP
+	lda	_SCCTIM,y		D022 LDA $CCTIM,X
+	beq	_CN22			D024 BEQ
+	adda	#$EF			D026 CLC / D027 ADC I,0EF: less $11
+	sta	_SCCTIM,y		D029 STA $CCTIM,X
+	bmi	_CNX			D02B BMI
+_CN22	dec	<RX			D02D DEX
+	bpl	_CN21			D02E BPL
+_CNX	rts				D030 RTS
+
+* The bonus adder's coins a bonus coin, by mode (CFD9, in the middle of the ROM's code).
+BONTAB	fcb	$7F,$02,$04,$04,$05,$03,$7F,$7F

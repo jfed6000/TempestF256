@@ -1,0 +1,380 @@
+* allang.a - ALLANG.MAC translated by tools/m65to09.py (model B), hand-finished here (src/).
+* Each line ends with the 6502 source line it comes from.
+_D_D_DENG	equ	*			ALLANG:50 ...ENG =.   ;ENGLISH TABLE TOP
+MSGLBS	equ	_D_D_DENG+240		ALLANG:56 MSGLBS =...CSY: colour, scale and Y of each message
+* EGAMOV: inside macro-built data, used only in offsets
+* FGAMOV: inside macro-built data, used only in offsets
+* GGAMOV: inside macro-built data, used only in offsets
+* SGAMOV: inside macro-built data, used only in offsets
+* EPLYR2: inside macro-built data, used only in offsets
+* EPLAYR: inside macro-built data, used only in offsets
+* FPLYR2: inside macro-built data, used only in offsets
+* FPLAYR: inside macro-built data, used only in offsets
+* GPLYR2: inside macro-built data, used only in offsets
+* GPLAYR: inside macro-built data, used only in offsets
+* SPLYR2: inside macro-built data, used only in offsets
+* SPLAYR: inside macro-built data, used only in offsets
+* EPRESS: inside macro-built data, used only in offsets
+* FPRESS: inside macro-built data, used only in offsets
+* GPRESS: inside macro-built data, used only in offsets
+* SPRESS: inside macro-built data, used only in offsets
+* EPLAY: inside macro-built data, used only in offsets
+* FPLAY: inside macro-built data, used only in offsets
+* GPLAY: inside macro-built data, used only in offsets
+* SPLAY: inside macro-built data, used only in offsets
+* EENTER: inside macro-built data, used only in offsets
+* FENTER: inside macro-built data, used only in offsets
+* GENTER: inside macro-built data, used only in offsets
+* SENTER: inside macro-built data, used only in offsets
+* EPRMOV: inside macro-built data, used only in offsets
+* FPRMOV: inside macro-built data, used only in offsets
+* GPRMOV: inside macro-built data, used only in offsets
+* SPRMOV: inside macro-built data, used only in offsets
+* EPRFIR: inside macro-built data, used only in offsets
+* FPRFIR: inside macro-built data, used only in offsets
+* GPRFIR: inside macro-built data, used only in offsets
+* SPRFIR: inside macro-built data, used only in offsets
+* EHIGHS: inside macro-built data, used only in offsets
+* FHIGHS: inside macro-built data, used only in offsets
+* GHIGHS: inside macro-built data, used only in offsets
+* SHIGHS: inside macro-built data, used only in offsets
+* ERANK: inside macro-built data, used only in offsets
+* FRANK: inside macro-built data, used only in offsets
+* GRANK: inside macro-built data, used only in offsets
+* SRANK: inside macro-built data, used only in offsets
+* ERATE: inside macro-built data, used only in offsets
+* FRATE: inside macro-built data, used only in offsets
+* GRATE: inside macro-built data, used only in offsets
+* SRATE: inside macro-built data, used only in offsets
+* ENOVIC: inside macro-built data, used only in offsets
+* FNOVIC: inside macro-built data, used only in offsets
+* SNOVIC: inside macro-built data, used only in offsets
+* GNOVIC: inside macro-built data, used only in offsets
+* EEXPER: inside macro-built data, used only in offsets
+* FEXPER: inside macro-built data, used only in offsets
+* SEXPER: inside macro-built data, used only in offsets
+* GEXPER: inside macro-built data, used only in offsets
+* EBONUS: inside macro-built data, used only in offsets
+* FBONUS: inside macro-built data, used only in offsets
+* GBONUS: inside macro-built data, used only in offsets
+* SBONUS: inside macro-built data, used only in offsets
+* ETIME: inside macro-built data, used only in offsets
+* FTIME: inside macro-built data, used only in offsets
+* GTIME: inside macro-built data, used only in offsets
+* STIME: inside macro-built data, used only in offsets
+* ELEVEL: inside macro-built data, used only in offsets
+* FLEVEL: inside macro-built data, used only in offsets
+* GLEVEL: inside macro-built data, used only in offsets
+* SLEVEL: inside macro-built data, used only in offsets
+* EHOLE: inside macro-built data, used only in offsets
+* FHOLE: inside macro-built data, used only in offsets
+* SHOLE: inside macro-built data, used only in offsets
+* GHOLE: inside macro-built data, used only in offsets
+* EINSER: inside macro-built data, used only in offsets
+* FINSER: inside macro-built data, used only in offsets
+* GINSER: inside macro-built data, used only in offsets
+* SINSER: inside macro-built data, used only in offsets
+* ECMODE: inside macro-built data, used only in offsets
+* FCMODE: inside macro-built data, used only in offsets
+* GCMODE: inside macro-built data, used only in offsets
+* SCMODE: inside macro-built data, used only in offsets
+* ECMOD1: inside macro-built data, used only in offsets
+* FCMOD1: inside macro-built data, used only in offsets
+* GCMOD1: inside macro-built data, used only in offsets
+* SCMOD1: inside macro-built data, used only in offsets
+* ECMOD2: inside macro-built data, used only in offsets
+* FCMOD2: inside macro-built data, used only in offsets
+* GCMOD2: inside macro-built data, used only in offsets
+* SCMOD2: inside macro-built data, used only in offsets
+* ECMOD3: inside macro-built data, used only in offsets
+* FCMOD3: inside macro-built data, used only in offsets
+* GCMOD3: inside macro-built data, used only in offsets
+* SCMOD3: inside macro-built data, used only in offsets
+* EATARI: inside macro-built data, used only in offsets
+* FATARI: inside macro-built data, used only in offsets
+* GATARI: inside macro-built data, used only in offsets
+* SATARI: inside macro-built data, used only in offsets
+* ZATLIE: inside macro-built data, used only in offsets
+* ECREDI: inside macro-built data, used only in offsets
+* FCREDI: inside macro-built data, used only in offsets
+* GCREDI: inside macro-built data, used only in offsets
+* SCREDI: inside macro-built data, used only in offsets
+* EBONPT: inside macro-built data, used only in offsets
+* FBONPT: inside macro-built data, used only in offsets
+* GBONPT: inside macro-built data, used only in offsets
+* SBONPT: inside macro-built data, used only in offsets
+* E2GAME: inside macro-built data, used only in offsets
+* F2GAME: inside macro-built data, used only in offsets
+* G2GAME: inside macro-built data, used only in offsets
+* S2GAME: inside macro-built data, used only in offsets
+* EBOLIF: inside macro-built data, used only in offsets
+* FBOLIF: inside macro-built data, used only in offsets
+* GBOLIF: inside macro-built data, used only in offsets
+* SBOLIF: inside macro-built data, used only in offsets
+* ESPIKE: inside macro-built data, used only in offsets
+* FSPIKE: inside macro-built data, used only in offsets
+* GSPIKE: inside macro-built data, used only in offsets
+* SSPIKE: inside macro-built data, used only in offsets
+* EAPROA: inside macro-built data, used only in offsets
+* FAPROA: inside macro-built data, used only in offsets
+* GAPROA: inside macro-built data, used only in offsets
+* SAPROA: inside macro-built data, used only in offsets
+* ESUPZA: inside macro-built data, used only in offsets
+* FSUPZA: inside macro-built data, used only in offsets
+* GSUPZA: inside macro-built data, used only in offsets
+* SSUPZA: inside macro-built data, used only in offsets
+* ENGMSG, FREMSG, GERMSG, SPAMSG (the MESS macro's .WORDs, ALLANG:28-39): the 120 message
+* addresses as module offsets, the source RELINI (reloc.a) copies to R.MSG with the module's
+* address added.  ALLANG's data is the ROM's byte for byte from $D031 (_D_D_DENG) to INILIT.
+	fdb	_D_D_DENG+$12C-ModBeg,_D_D_DENG+$15E-ModBeg,_D_D_DENG+$15E-ModBeg,_D_D_DENG+$180-ModBeg,_D_D_DENG+$1BA-ModBeg,_D_D_DENG+$1D2-ModBeg	English
+	fdb	_D_D_DENG+$230-ModBeg,_D_D_DENG+$29A-ModBeg,_D_D_DENG+$302-ModBeg,_D_D_DENG+$335-ModBeg,_D_D_DENG+$37F-ModBeg,_D_D_DENG+$3B5-ModBeg
+	fdb	_D_D_DENG+$3CE-ModBeg,_D_D_DENG+$3E6-ModBeg,_D_D_DENG+$3EC-ModBeg,_D_D_DENG+$403-ModBeg,_D_D_DENG+$41B-ModBeg,_D_D_DENG+$42F-ModBeg
+	fdb	_D_D_DENG+$470-ModBeg,_D_D_DENG+$47A-ModBeg,_D_D_DENG+$4BE-ModBeg,_D_D_DENG+$4FF-ModBeg,_D_D_DENG+$544-ModBeg,_D_D_DENG+$554-ModBeg
+	fdb	_D_D_DENG+$570-ModBeg,_D_D_DENG+$577-ModBeg,_D_D_DENG+$5B8-ModBeg,_D_D_DENG+$5EB-ModBeg,_D_D_DENG+$631-ModBeg,_D_D_DENG+$649-ModBeg
+	fdb	_D_D_DENG+$136-ModBeg,_D_D_DENG+$166-ModBeg,_D_D_DENG+$166-ModBeg,_D_D_DENG+$18C-ModBeg,_D_D_DENG+$1BF-ModBeg,_D_D_DENG+$1E6-ModBeg	French
+	fdb	_D_D_DENG+$244-ModBeg,_D_D_DENG+$2AF-ModBeg,_D_D_DENG+$30E-ModBeg,_D_D_DENG+$348-ModBeg,_D_D_DENG+$38D-ModBeg,_D_D_DENG+$3B5-ModBeg
+	fdb	_D_D_DENG+$3CE-ModBeg,_D_D_DENG+$3E6-ModBeg,_D_D_DENG+$3F1-ModBeg,_D_D_DENG+$409-ModBeg,_D_D_DENG+$420-ModBeg,_D_D_DENG+$43C-ModBeg
+	fdb	_D_D_DENG+$470-ModBeg,_D_D_DENG+$489-ModBeg,_D_D_DENG+$4CC-ModBeg,_D_D_DENG+$50E-ModBeg,_D_D_DENG+$544-ModBeg,_D_D_DENG+$554-ModBeg
+	fdb	_D_D_DENG+$570-ModBeg,_D_D_DENG+$588-ModBeg,_D_D_DENG+$5C5-ModBeg,_D_D_DENG+$5F8-ModBeg,_D_D_DENG+$637-ModBeg,_D_D_DENG+$649-ModBeg
+	fdb	_D_D_DENG+$144-ModBeg,_D_D_DENG+$16E-ModBeg,_D_D_DENG+$16E-ModBeg,_D_D_DENG+$19E-ModBeg,_D_D_DENG+$1C5-ModBeg,_D_D_DENG+$1FF-ModBeg	German
+	fdb	_D_D_DENG+$263-ModBeg,_D_D_DENG+$2CA-ModBeg,_D_D_DENG+$31F-ModBeg,_D_D_DENG+$35A-ModBeg,_D_D_DENG+$39A-ModBeg,_D_D_DENG+$3C4-ModBeg
+	fdb	_D_D_DENG+$3DD-ModBeg,_D_D_DENG+$3E6-ModBeg,_D_D_DENG+$3F7-ModBeg,_D_D_DENG+$410-ModBeg,_D_D_DENG+$42A-ModBeg,_D_D_DENG+$452-ModBeg
+	fdb	_D_D_DENG+$470-ModBeg,_D_D_DENG+$49B-ModBeg,_D_D_DENG+$4DD-ModBeg,_D_D_DENG+$520-ModBeg,_D_D_DENG+$544-ModBeg,_D_D_DENG+$55D-ModBeg
+	fdb	_D_D_DENG+$570-ModBeg,_D_D_DENG+$597-ModBeg,_D_D_DENG+$5D3-ModBeg,_D_D_DENG+$60D-ModBeg,_D_D_DENG+$63E-ModBeg,_D_D_DENG+$65E-ModBeg
+	fdb	_D_D_DENG+$14E-ModBeg,_D_D_DENG+$177-ModBeg,_D_D_DENG+$177-ModBeg,_D_D_DENG+$1AD-ModBeg,_D_D_DENG+$1CB-ModBeg,_D_D_DENG+$21C-ModBeg	Spanish
+	fdb	_D_D_DENG+$27D-ModBeg,_D_D_DENG+$2E5-ModBeg,_D_D_DENG+$32D-ModBeg,_D_D_DENG+$36F-ModBeg,_D_D_DENG+$3A9-ModBeg,_D_D_DENG+$3BC-ModBeg
+	fdb	_D_D_DENG+$3D5-ModBeg,_D_D_DENG+$3E6-ModBeg,_D_D_DENG+$3FC-ModBeg,_D_D_DENG+$415-ModBeg,_D_D_DENG+$425-ModBeg,_D_D_DENG+$461-ModBeg
+	fdb	_D_D_DENG+$470-ModBeg,_D_D_DENG+$4AC-ModBeg,_D_D_DENG+$4EE-ModBeg,_D_D_DENG+$532-ModBeg,_D_D_DENG+$544-ModBeg,_D_D_DENG+$566-ModBeg
+	fdb	_D_D_DENG+$570-ModBeg,_D_D_DENG+$5A8-ModBeg,_D_D_DENG+$5DF-ModBeg,_D_D_DENG+$620-ModBeg,_D_D_DENG+$643-ModBeg,_D_D_DENG+$670-ModBeg
+	fcb	$51,$56,$00,$1A,$01,$20,$31,$56
+	fcb	$01,$38,$31,$B0,$41,$00,$11,$F6
+	fcb	$30,$38,$31,$CE,$51,$0A,$31,$E2
+	fcb	$31,$E2,$51,$BA,$51,$98,$51,$D8
+	fcb	$51,$C9,$31,$56,$51,$80,$51,$80
+	fcb	$51,$80,$51,$80,$71,$92,$51,$80
+	fcb	$31,$B0,$51,$89,$41,$89,$00,$00
+	fcb	$71,$5A,$71,$A0,$E5,$22,$16,$2E
+	fcb	$1E,$00,$32,$40,$1E,$B8,$D9,$20
+	fcb	$26,$30,$00,$1C,$1E,$00,$34,$16
+	fcb	$38,$3C,$26,$9E,$E5,$3A,$34,$26
+	fcb	$1E,$2C,$1E,$30,$1C,$9E,$D3,$28
+	fcb	$3E,$1E,$22,$32,$00,$3C,$1E,$38
+	fcb	$2E,$26,$30,$16,$1C,$B2,$CD,$34
+	fcb	$2C,$16,$46,$1E,$38,$80,$C6,$28
+	fcb	$32,$3E,$1E,$3E,$38,$80,$C6,$3A
+	fcb	$34,$26,$1E,$2C,$1E,$38,$80,$C6
+	fcb	$28,$3E,$22,$16,$1C,$32,$38,$80
+	fcb	$DF,$34,$38,$1E,$3A,$3A,$00,$3A
+	fcb	$3C,$16,$38,$BC,$CD,$16,$34,$34
+	fcb	$3E,$46,$1E,$48,$00,$3A,$3E,$38
+	fcb	$00,$3A,$3C,$16,$38,$BC,$D6,$3A
+	fcb	$3C,$16,$38,$3C,$00,$1C,$38,$3E
+	fcb	$1E,$1A,$2A,$1E,$B0,$DC,$34,$3E
+	fcb	$2C,$3A,$16,$38,$00,$3A,$3C,$16
+	fcb	$38,$BC,$F4,$34,$2C,$16,$C6,$F1
+	fcb	$28,$32,$3E,$1E,$C8,$F1,$3A,$34
+	fcb	$26,$1E,$AC,$EE,$28,$3E,$1E,$22
+	fcb	$3E,$9E,$C7,$1E,$30,$3C,$1E,$38
+	fcb	$00,$46,$32,$3E,$38,$00,$26,$30
+	fcb	$26,$3C,$26,$16,$2C,$BA,$B8,$3A
+	fcb	$40,$34,$00,$1E,$30,$3C,$38,$1E
+	fcb	$48,$00,$40,$32,$3A,$00,$26,$30
+	fcb	$26,$3C,$26,$16,$2C,$1E,$BA,$AC
+	fcb	$22,$1E,$18,$1E,$30,$00,$3A,$26
+	fcb	$1E,$00,$26,$24,$38,$1E,$00,$26
+	fcb	$30,$26,$3C,$26,$16,$2C,$1E,$30
+	fcb	$00,$1E,$26,$B0,$C7,$1E,$30,$3C
+	fcb	$38,$1E,$00,$3A,$3E,$3A,$00,$26
+	fcb	$30,$26,$1A,$26,$16,$2C,$1E,$BA
+	fcb	$C7,$3A,$34,$26,$30,$00,$2A,$30
+	fcb	$32,$18,$00,$3C,$32,$00,$1A,$24
+	fcb	$16,$30,$22,$9E,$A6,$3C,$32,$3E
+	fcb	$38,$30,$1E,$48,$00,$2C,$1E,$00
+	fcb	$18,$32,$3E,$3C,$32,$30,$00,$34
+	fcb	$32,$3E,$38,$00,$1A,$24,$16,$30
+	fcb	$22,$1E,$B8,$B5,$2A,$30,$32,$34
+	fcb	$20,$00,$1C,$38,$1E,$24,$1E,$30
+	fcb	$00,$48,$3E,$2E,$00,$42,$1E,$1A
+	fcb	$24,$3A,$1E,$2C,$B0,$AC,$22,$26
+	fcb	$38,$1E,$00,$2C,$16,$00,$34,$1E
+	fcb	$38,$26,$2C,$2C,$16,$00,$34,$16
+	fcb	$38,$16,$00,$1A,$16,$2E,$18,$26
+	fcb	$16,$B8,$C4,$34,$38,$1E,$3A,$3A
+	fcb	$00,$20,$26,$38,$1E,$00,$3C,$32
+	fcb	$00,$3A,$1E,$2C,$1E,$1A,$BC,$B2
+	fcb	$34,$32,$3E,$3A,$3A,$1E,$48,$00
+	fcb	$20,$1E,$3E,$00,$36,$3E,$16,$30
+	fcb	$1C,$00,$1A,$32,$38,$38,$1E,$1A
+	fcb	$3C,$9E,$B2,$20,$26,$38,$1E,$00
+	fcb	$1C,$38,$3E,$1E,$1A,$2A,$1E,$30
+	fcb	$00,$42,$1E,$30,$30,$00,$38,$26
+	fcb	$1A,$24,$3C,$26,$A2,$AC,$32,$34
+	fcb	$38,$26,$2E,$16,$00,$20,$26,$38
+	fcb	$1E,$00,$34,$16,$38,$16,$00,$3A
+	fcb	$1E,$2C,$1E,$1A,$1A,$26,$32,$30
+	fcb	$16,$B8,$BC,$24,$26,$22,$24,$00
+	fcb	$3A,$1A,$32,$38,$1E,$BA,$9E,$2E
+	fcb	$1E,$26,$2C,$2C,$1E,$3E,$38,$3A
+	fcb	$00,$3A,$1A,$32,$38,$1E,$BA,$B0
+	fcb	$24,$32,$1E,$1A,$24,$3A,$3C,$48
+	fcb	$16,$24,$2C,$1E,$B0,$D4,$38,$1E
+	fcb	$1A,$32,$38,$1C,$BA,$C2,$38,$16
+	fcb	$30,$2A,$26,$30,$22,$00,$20,$38
+	fcb	$32,$2E,$00,$04,$00,$3C,$32,$80
+	fcb	$C2,$34,$2C,$16,$1A,$1E,$2E,$1E
+	fcb	$30,$3C,$00,$1C,$1E,$00,$04,$00
+	fcb	$16,$80,$BC,$38,$16,$30,$22,$2C
+	fcb	$26,$3A,$3C,$1E,$00,$40,$32,$30
+	fcb	$00,$04,$00,$48,$3E,$2E,$80,$C8
+	fcb	$38,$16,$30,$2A,$26,$30,$22,$00
+	fcb	$1C,$1E,$00,$04,$00,$16,$80,$D9
+	fcb	$38,$16,$3C,$1E,$00,$46,$32,$3E
+	fcb	$38,$3A,$1E,$2C,$A0,$DC,$1E,$40
+	fcb	$16,$2C,$3E,$1E,$48,$4C,$40,$32
+	fcb	$3E,$BA,$D6,$3A,$1E,$2C,$18,$3A
+	fcb	$3C,$00,$38,$1E,$1A,$24,$30,$1E
+	fcb	$B0,$DF,$1A,$16,$2C,$26,$20,$26
+	fcb	$36,$3E,$1E,$3A,$9E,$AA,$30,$32
+	fcb	$40,$26,$1A,$9E,$AA,$30,$32,$40
+	fcb	$26,$1A,$26,$B2,$AA,$16,$30,$20
+	fcb	$16,$1E,$30,$22,$1E,$B8,$4A,$1E
+	fcb	$44,$34,$1E,$38,$BC,$45,$1E,$44
+	fcb	$34,$1E,$38,$3C,$B2,$40,$1E,$38
+	fcb	$20,$16,$24,$38,$1E,$B0,$8B,$18
+	fcb	$32,$30,$3E,$BA,$E8,$3C,$26,$2E
+	fcb	$9E,$E0,$1C,$3E,$38,$1E,$9E,$E8
+	fcb	$48,$1E,$26,$BC,$E4,$3C,$26,$1E
+	fcb	$2E,$34,$B2,$8B,$2C,$1E,$40,$1E
+	fcb	$AC,$8B,$30,$26,$40,$1E,$16,$BE
+	fcb	$8B,$22,$38,$16,$9C,$8B,$30,$26
+	fcb	$40,$1E,$AC,$8B,$24,$32,$2C,$9E
+	fcb	$8B,$3C,$38,$32,$BE,$8B,$24,$32
+	fcb	$46,$B2,$8B,$2C,$32,$1A,$A4,$DC
+	fcb	$26,$30,$3A,$1E,$38,$3C,$00,$1A
+	fcb	$32,$26,$30,$BA,$C1,$26,$30,$3C
+	fcb	$38,$32,$1C,$3E,$26,$38,$1E,$00
+	fcb	$2C,$1E,$3A,$00,$34,$26,$1E,$1A
+	fcb	$1E,$BA,$D6,$22,$1E,$2C,$1C,$00
+	fcb	$1E,$26,$30,$42,$1E,$38,$20,$1E
+	fcb	$B0,$D6,$26,$30,$3A,$1E,$38,$3C
+	fcb	$1E,$00,$20,$26,$1A,$24,$16,$BA
+	fcb	$00,$20,$38,$1E,$1E,$00,$34,$2C
+	fcb	$16,$C6,$0E,$04,$00,$1A,$32,$26
+	fcb	$30,$00,$06,$00,$34,$2C,$16,$46
+	fcb	$BA,$FA,$04,$00,$34,$26,$1E,$1A
+	fcb	$1E,$00,$06,$00,$28,$32,$3E,$1E
+	fcb	$3E,$38,$BA,$00,$04,$00,$2E,$3E
+	fcb	$1E,$30,$48,$00,$06,$00,$3A,$34
+	fcb	$26,$1E,$2C,$9E,$FA,$04,$00,$2E
+	fcb	$32,$30,$1E,$1C,$16,$00,$06,$00
+	fcb	$28,$3E,$1E,$22,$32,$BA,$14,$04
+	fcb	$00,$1A,$32,$26,$30,$00,$04,$00
+	fcb	$34,$2C,$16,$C6,$00,$04,$00,$34
+	fcb	$26,$1E,$1A,$1E,$00,$04,$00,$28
+	fcb	$32,$3E,$1E,$3E,$B8,$00,$04,$00
+	fcb	$2E,$3E,$1E,$30,$48,$1E,$00,$04
+	fcb	$00,$3A,$34,$26,$1E,$AC,$00,$04
+	fcb	$00,$2E,$32,$30,$1E,$1C,$16,$00
+	fcb	$04,$00,$28,$3E,$1E,$22,$B2,$0E
+	fcb	$06,$00,$1A,$32,$26,$30,$3A,$00
+	fcb	$04,$00,$34,$2C,$16,$C6,$FA,$06
+	fcb	$00,$34,$26,$1E,$1A,$1E,$3A,$00
+	fcb	$04,$00,$28,$32,$3E,$1E,$3E,$B8
+	fcb	$FA,$06,$00,$2E,$3E,$1E,$30,$48
+	fcb	$1E,$30,$00,$04,$00,$3A,$34,$26
+	fcb	$1E,$AC,$FA,$06,$00,$2E,$32,$30
+	fcb	$1E,$1C,$16,$3A,$00,$04,$00,$28
+	fcb	$3E,$1E,$22,$B2
+ZATLIS
+	fcb	$D3,$50,$00,$2E,$1A,$2E,$2C,$44
+	fcb	$44,$44,$00,$16,$3C,$16,$38,$A6
+	fcb	$A0,$1A,$38,$1E,$1C,$26,$3C,$3A
+	fcb	$80,$A0,$2A,$38,$1E,$1C,$26,$3C
+	fcb	$1E,$80,$A0,$1A,$38,$1E,$1C,$26
+	fcb	$3C,$32,$3A,$80,$DA,$18,$32,$30
+	fcb	$3E,$3A,$80,$D0,$06,$00,$1A,$38
+	fcb	$1E,$1C,$26,$3C,$00,$2E,$26,$30
+	fcb	$26,$2E,$3E,$AE,$D6,$06,$00,$28
+	fcb	$1E,$3E,$44,$00,$2E,$26,$30,$26
+	fcb	$2E,$3E,$AE,$D0,$06,$00,$3A,$34
+	fcb	$26,$1E,$2C,$1E,$00,$2E,$26,$30
+	fcb	$26,$2E,$3E,$AE,$D3,$06,$00,$28
+	fcb	$3E,$1E,$22,$32,$3A,$00,$2E,$26
+	fcb	$30,$26,$2E,$B2,$C8,$18,$32,$30
+	fcb	$3E,$3A,$00,$1E,$40,$1E,$38,$46
+	fcb	$80,$CE,$18,$32,$30,$3E,$3A,$00
+	fcb	$1A,$24,$16,$36,$3E,$1E,$80,$CE
+	fcb	$18,$32,$30,$3E,$3A,$00,$28,$1E
+	fcb	$1C,$1E,$80,$C8,$18,$32,$30,$3E
+	fcb	$3A,$00,$1A,$16,$1C,$16,$80,$B8
+	fcb	$16,$40,$32,$26,$1C,$00,$3A,$34
+	fcb	$26,$2A,$1E,$BA,$88,$16,$3C,$3C
+	fcb	$1E,$30,$3C,$26,$32,$30,$00,$16
+	fcb	$3E,$44,$00,$2C,$16,$30,$1A,$1E
+	fcb	$BA,$96,$3A,$34,$26,$3C,$48,$1E
+	fcb	$30,$00,$16,$3E,$3A,$42,$1E,$26
+	fcb	$1A,$24,$1E,$B0,$A0,$1E,$40,$26
+	fcb	$3C,$1E,$00,$2C,$16,$3A,$00,$34
+	fcb	$3E,$30,$3C,$16,$BA,$E0,$2C,$1E
+	fcb	$40,$1E,$AC,$DA,$30,$26,$40,$1E
+	fcb	$16,$BE,$E2,$22,$38,$16,$9C,$E0
+	fcb	$30,$26,$40,$1E,$AC,$C4,$3A,$3E
+	fcb	$34,$1E,$38,$48,$16,$34,$34,$1E
+	fcb	$38,$00,$38,$1E,$1A,$24,$16,$38
+	fcb	$22,$9E,$CD,$30,$1E,$3E,$1E,$38
+	fcb	$00,$3A,$3E,$34,$1E,$38,$48,$16
+	fcb	$34,$34,$1E,$B8,$CD,$30,$3E,$1E
+	fcb	$40,$32,$00,$3A,$3E,$34,$1E,$38
+	fcb	$48,$16,$34,$34,$1E,$B8
+* LNGTAB: the four message tables' copies (reloc.a), as data-area offsets
+LNGTAB
+	fdb	R.MSG			ALLANG:253 LNGTAB: .WORD ENGMSG
+	fdb	R.MSG+60		ALLANG:254 .WORD FREMSG
+	fdb	R.MSG+120		ALLANG:255 .WORD GERMSG
+	fdb	R.MSG+180		ALLANG:256 .WORD SPAMSG
+INILIT
+* HAND: hardware register (ALLANG:259 LDA INOP1  ;SET UP BONUS LIFE INTERVAL)
+	lda	HW_0E00,u			ALLANG:259 LDA INOP1  ;SET UP BONUS LIFE INTERVAL
+	sta	<OPTIN2			ALLANG:260 STA OPTIN2
+	anda	#$38			ALLANG:261 AND I,38
+	lsra			ALLANG:262 LSR
+	lsra			ALLANG:263 LSR
+	lsra			ALLANG:264 LSR
+	sta	<RX			ALLANG:265 TAX
+	leax	TBLIFI,pcr			ROM table + X
+	ldb	<RX
+	abx
+	lda	0,x			ALLANG:266 LDA X,TBLIFI
+	sta	BLIFIN,u			ALLANG:267 STA BLIFIN
+* HAND: hardware register (ALLANG:268 LDA INOP0  ;READ OPTION SWITCHES)
+	lda	HW_0D00,u			ALLANG:268 LDA INOP0  ;READ OPTION SWITCHES
+	eora	#$02			ALLANG:269 EOR I,2
+	sta	<_SCMODE			ALLANG:270 STA $CMODE
+	lda	<OPTIN2			ALLANG:271 LDA OPTIN2  ;LIVES/GAME
+	rola			ALLANG:272 ROL
+	rola			ALLANG:273 ROL
+	rola			ALLANG:274 ROL
+	anda	#$03			ALLANG:275 AND I,3
+	sta	<RX			ALLANG:276 TAX
+	leax	GAMLVS,pcr			ROM table + X
+	ldb	<RX
+	abx
+	lda	0,x			ALLANG:277 LDA X,GAMLVS
+	sta	LVSGAM,u			ALLANG:278 STA LVSGAM
+	lda	<OPTIN2			ALLANG:279 LDA OPTIN2  ;LANGUAGE CHOICE
+	anda	#$06			ALLANG:280 AND I,06
+	sta	<RY			ALLANG:281 TAY
+	ldx	<RYP			data base + Y: LNGTAB's copy (reloc.a)
+	lda	R.LNG,x			ALLANG:282 LDA Y,LNGTAB  ;SET POINTER TO LANGUAGE PTRS.
+	sta	<LITRAL+1			ALLANG:283 STA LITRAL
+	lda	R.LNG+1,x			ALLANG:284 LDA Y,LNGTAB+1
+	sta	<LITRAL			ALLANG:285 STA LITRAL+1
+* (ALLANG:286) GETOP3 is translated (stubs.a); nothing after INILIT reads V.
+	lbsr	GETOP3			ALLANG:286 JSR GETOP3
+	sta	OPTIN3,u			ALLANG:287 STA OPTIN3
+	rts			ALLANG:288 RTS
+TBLIFI
+	fcb	$02,$01,$03,$04,$05,$06,$07,$00		ALLANG:289 TBLIFI: .BYTE 2,1,3,4,5,6,7,0
+GAMLVS
+	fcb	$03,$04,$05,$02		ALLANG:290 GAMLVS: .BYTE 3,4,5,2
+

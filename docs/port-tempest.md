@@ -147,7 +147,10 @@ Tempest checks itself, and punishes a failed check. Found by name (`ZAT*`, `ZQ*`
   into `QT4`, acted on by `ZQPOKS` (`ALDIS2.MAC:961`). A software LFSR stepped per read would pass it;
   `ZPONTS`'s nibble test it would not.
 - `ZATC4V` (`ALSCO2.MAC:105`), the `ZATC3`/`ZATC4` ranges, and the `ZATLIS` sum (`ALSCO2.MAC:983`)
-  verify the copyright message and the calls to it.
+  verify the copyright message and the calls to it. **`ZATC4V` XORs 6502 code** (`ZATC4S`, the call
+  to the ATARI message) into `QT2`, acted on by `ZQAT4C` (`ALEXEC.MAC:262`, a `SED`): on the port
+  that code is 6809, so it is neutralised to its passing result (`src/alsco2.a`; found by the
+  recorded-state test, 2026-09-23). `ZATLIS` sums message data, which the port holds byte for byte.
 
 Neutralise them by making each check pass, not by deleting the flags — the guide's stubbing rule
 (section 1) applies: grep every consumer first.

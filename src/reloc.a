@@ -1,0 +1,75 @@
+* reloc.a - the game's address tables, copied into the data area at start-up with run-time
+* addresses (docs/status.md, "D6 step 2"; Joust's src/reloc.a, little-endian here).
+*
+* The module holds each table as its relocation source, in the table's own place and size: module
+* addresses as label-ModBeg, data-area addresses as offsets (the arcade's RAM address is its
+* offset), vector-RAM addresses as the arcade's $2xxx.  RELINI copies each to its R.xxx place
+* (port.d) adding the module's address (M), the data area's (D) or window A's less $2000 (W), and
+* writes each word little-endian, as the translated 6502 code reads it a byte at a time.
+*
+* RELLST: one entry per table, 0 ends the list:
+*   FDB  the table in the module (label-ModBeg)
+*   FDB  its copy in the data area (an offset)
+*   FCB  repeats of the layout
+*   FCC  the layout, one letter per word (M, D or W), then FCB 0
+
+RELLST	fdb	BUFASL-ModBeg,R.BUF	BUFASL, BUFBSL, BUFSWL (ALVROM:2017-2049)
+	fcb	27
+	fcc	/W/
+	fcb	0
+	fdb	LNGTAB-ModBeg,R.LNG	LNGTAB (ALLANG:253): the message tables' copies
+	fcb	4
+	fcc	/D/
+	fcb	0
+	fdb	_D_D_DENG-ModBeg,R.MSG	ENGMSG, FREMSG, GERMSG, SPAMSG (ALLANG:28-39)
+	fcb	120
+	fcc	/M/
+	fcb	0
+	fdb	WTABLE-ModBeg,R.WTAB	WTABLE (ALWELG:728): a skill table, the variable it sets
+	fcb	28
+	fcc	/MD/
+	fcb	0
+	fdb	0
+
+* RELINI - copy and fix every RELLST table.  U = the data area, with VWIN set; U kept.
+RELINI	pshs	u			4,s the data area
+	leax	ModBeg,pcr
+	pshs	x			2,s the module's address
+	ldd	VWIN,u
+	subd	#$2000
+	pshs	d			0,s window A less $2000
+	leay	RELLST,pcr
+_RI1	ldd	,y++			the table in the module (0: the end)
+	beq	_RIX
+	leax	ModBeg,pcr
+	leax	d,x			X = the table
+	ldd	,y++
+	ldu	4,s
+	leau	d,u			U = its copy
+	ldb	,y+
+	pshs	y,b			0,s repeats left, 1,s the layout; the bases now at 3,s
+_RI2	lda	,y+			the next word's kind
+	beq	_RI6			the layout's end
+	cmpa	#'M
+	beq	_RI3
+	cmpa	#'W
+	beq	_RI4
+	ldd	,x++			D: an offset in the data area
+	addd	7,s
+	bra	_RI5
+_RI3	ldd	,x++			M: an offset in the module
+	addd	5,s
+	bra	_RI5
+_RI4	ldd	,x++			W: a vector-RAM address
+	addd	3,s
+_RI5	stb	,u+			little-endian
+	sta	,u+
+	bra	_RI2
+_RI6	dec	,s
+	beq	_RI7
+	ldy	1,s			the layout again
+	bra	_RI2
+_RI7	leas	3,s			Y = past the layout: the next entry
+	bra	_RI1
+_RIX	leas	4,s
+	puls	u,pc

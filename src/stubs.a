@@ -1,0 +1,15 @@
+* stubs.a - symbols the translation references and cannot define (HAND).
+* GETOP3 (ALTES2.MAC:632, in the self-test the port drops): option switch bank 3, read through the
+* POKEYs' pot ports.  The platform layer fills the shadows from the settings file.
+GETOP3	sta	HW_60DB,u		STA POTGO2
+	lda	HW_60D8,u		LDA ALLPO2  ;READ LOW 3 BITS OF 3RD SWITCH
+	anda	#$07			AND I,MOPT13
+	sta	<INDEX1			STA INDEX1
+	sta	HW_60CB,u		STA POTGO
+	lda	HW_60C8,u		LDA ALLPOT  ;READ HIGH BIT OF 4 IN 3RD SWITCH
+	anda	#$20			AND I,MOPTI4
+	lsra				LSR
+	lsra				LSR
+	ora	<INDEX1			ORA INDEX1  ;MERGE (V: nothing after INILIT reads it)
+	rts
+RESET	rts				HAND: stub

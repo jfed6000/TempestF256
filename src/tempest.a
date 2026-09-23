@@ -1,0 +1,23 @@
+* tempest.a - the game, hand-finished from the draft tools/m65to09.py writes to xlat/ (docs/status.md).
+* Model B (docs/status.md, D6).  Assemble: lwasm --6809 --format=raw.
+
+	opt	c
+	include	port.d
+	include	arcade.d
+
+ModBeg	equ	*			the module's start: relocation offsets are from here
+
+	include	alwelg.a
+	include	alsco2.a
+	include	aldis2.a
+	include	alexec.a
+	include	alsoun.a
+	include	alvrom.a
+	include	alcoin.a
+	include	allang.a
+	include	alhar2.a
+	include	alearo.a
+	include	alvgut.a
+	include	stubs.a
+	include	reloc.a
+VROM	includebin	vrom.bin		vector ROM (136002-138.np3), read by the CPU and the interpreter
