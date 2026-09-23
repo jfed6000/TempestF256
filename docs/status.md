@@ -1102,6 +1102,15 @@ assemble without `HIRES` and keep checking the 320 form: `avgtest.py` play captu
 byte-exact). The top line's E, J, D: columns 333, 343, 353, 2-dot gaps. Play and attract checks
 right. The line records still double a 320 endpoint (to do the same for lines: the next step).
 
+**The logo's smear and the copyright line's "shadow" (K2 photographs, 2026-09-23).** The attract
+logo is ~700 vectors: the TEMPEST outline repeated at a row or two apart in five colours. MAME's
+own frame (`avg_attract.bin` 6861, drawn from Atari's list at 1280×960) shows the copies as
+separate outlines; the same frame drawn at 640×240 merges them into exactly the photographed
+smear, and `osrun.py`'s picture of the port agrees. **It is the 240 rows, not a fault.** Possible
+remedy (a port simplification, the user's call): draw only some of the copies. The copyright line
+is clean in the model: dark blue text on black, which a capture device smears most; to be
+checked on a direct monitor.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
