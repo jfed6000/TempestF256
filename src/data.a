@@ -68,6 +68,10 @@ SNDV                rmb       1                   SndOut: its voice
 SNDSR               rmb       1                   SndOut: the sustain/release wanted
 SNDF                rmb       2                   SndOut: the frequency wanted
 SNDCT               rmb       1                   SndOut: the control register wanted
+SNDCC               rmb       1                   SidOn: CC as found (the interrupt mask)
+SNDF0               rmb       1                   SidOn: the MMU's control register as found
+SNDSL               rmb       1                   SidOn: window A's slot
+SNDOB               rmb       1                   SidOn: the block it held
 TSMODE              rmb       1                   the first character of the parameters ('s': tsnd)
 TSRUN               rmb       1                   tsnd: the sequence is playing
 TSSEQ               rmb       1                   tsnd: its next step (offset in TsSeq)

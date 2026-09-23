@@ -7,7 +7,8 @@ Joust's tools/piccheck.py (its data-area convention item 9 and PIC rules), with 
 approved exception.  Reported, per listing line:
 
   EXT   an extended-mode operand (absolute address), except the two approved exceptions: the
-        VS1053 registers $FF50-$FF57 and the integer coprocessor $FEE0-$FEFF (Tempest's D8)
+        VS1053 registers $FF50-$FF57, the integer coprocessor $FEE0-$FEFF (Tempest's D8) and
+        the MMU's registers $FFA0-$FFAF (sound.a, masked and restored)
   EXTI  extended indirect ([addr] without a register)
   IMM   an immediate whose value is a code or data address
         (#label; #label-label is a constant and passes)
@@ -46,6 +47,7 @@ PCREGS = {'PCR', 'PC'}
 IND_REGS = {'X', 'Y', 'U', 'S'}
 VS1053 = range(0xFF50, 0xFF58)
 COPROC = range(0xFEE0, 0xFF00)         # D8 (docs/port-plan.md): masked at every use
+MMUREG = range(0xFFA0, 0xFFB0)         # sound.a SidOn/SidOff (user, 2026-09-23): masked, restored
 DATA_ADDR = {}   # data label -> its offset in the data area (from rmb lines)
 
 
@@ -273,7 +275,7 @@ def check(path):
         # extended (no immediate opcode has high nibble 7, B or F)
         ext = is_extended(r['bytes'])
         if ext is not None:
-            if ext not in VS1053 and ext not in COPROC:
+            if ext not in VS1053 and ext not in COPROC and ext not in MMUREG:
                 problems.append(('EXT', where, text))
             continue
         # direct: page 0 of the data area; a code label there is an absolute address

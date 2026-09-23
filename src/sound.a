@@ -4,8 +4,12 @@
 *   tsnd, the sound test (tempest s).
 *
 *   The SIDs are in the I/O block $C4 (the FPGA's $18_8000: left at
-*   +$000, right at +$100; +$080 writes both), reached through the
-*   service window with Map1 like any block: no absolute address.
+*   +$000, right at +$100; +$080 writes both).  They are reached by
+*   writing the MMU directly (user's call, 2026-09-23: the third absolute
+*   address exception, $FFA0-$FFAF): interrupts masked, window A's slot
+*   holds $C4 while the SIDs are written, then its block again.  With
+*   interrupts masked no task switch can reload the MMU, and vector RAM
+*   is only used by the main loop, which SndOut is part of.
 *   Two SIDs are six voices for the POKEYs' eight channels; Tempest
 *   sounds at most five at once (docs/status.md, "Sound"), so a
 *   channel takes a free voice when it starts sounding and gives it
@@ -24,8 +28,6 @@
 *       sustain, so a louder volume, or a new waveform, re-gates.
 *   Written once a pass (60 Hz), where the arcade's POKEYs change at
 *   the IRQ's 246 Hz; only the registers that change are written.
-*   The window is shared with the text bitmap (text.a): while a game
-*   frame's drawing is under way and the text holds it, SndOut waits.
 *   Runs with U = the data area and DP its page.
 ********************************************************************
 
@@ -34,32 +36,75 @@ SIDPWH              equ       $08                 a pulse's width, high nibble: 
 SIDVOL              equ       $0F                 each SID's master volume, filters off
 SNFDIV              equ       59319               the noise's SID frequency times (AUDF+1)
 
-* SidMap - the SIDs into the service window.  Exit: X = the left SID;
-*   carry = F$MapBlk's error in B.  Y, U kept.
-SidMap              leax      SWIN,u
+MMUCTL              equ       $FFA0               the MMU: bits 1-0 the active LUT, 5-4 the one $FFA8-$FFAF edit
+MMUSLT              equ       $FFA8               the edited LUT's eight slots (read and write)
+
+* SidOn - interrupts masked, window A's slot holding the SIDs' block.
+*   Exit: X = the left SID.  Y, U kept.  SidOff must follow, soon: it
+*   puts the slot and the mask back.
+SidOn               tfr       cc,a
+                    sta       SNDCC,u
+                    orcc      #$50
+                    lda       MMUCTL              pic:ok the MMU (user-approved exception)
+                    sta       SNDF0,u
+                    anda      #$03                edit the active LUT
+                    lsla
+                    lsla
+                    lsla
+                    lsla
+                    pshs      a
+                    lda       SNDF0,u
+                    anda      #$CF
+                    ora       ,s+
+                    sta       MMUCTL              pic:ok
+                    lda       VWIN,u              window A's slot: its address / 8K
+                    lsra
+                    lsra
+                    lsra
+                    lsra
+                    lsra
+                    sta       SNDSL,u
+                    ldx       #MMUSLT
+                    ldb       SNDSL,u
+                    lda       b,x
+                    sta       SNDOB,u             its block, to put back
                     lda       #SIDBLK
-                    lbsr      Map1                D = the block's logical address
-                    bcs       smx
-                    tfr       d,x
-smx                 rts
+                    sta       b,x
+                    ldx       VWIN,u
+                    rts
+
+* SidOff - window A's block back in its slot, the MMU's LUT selection
+*   and the interrupt mask as SidOn found them.  All registers kept but CC.
+SidOff              pshs      a,b,x
+                    ldx       #MMUSLT
+                    ldb       SNDSL,u
+                    lda       SNDOB,u
+                    sta       b,x
+                    lda       SNDF0,u
+                    sta       MMUCTL              pic:ok
+                    lda       SNDCC,u
+                    tfr       a,cc
+                    puls      a,b,x,pc
 
 * SidReg - X = the left SID, B = voice 0-5: Y = the voice's registers.
 *   B, X kept.
 SidReg              pshs      b,x
-                    leay      SidOff,pcr
+                    leay      SidVof,pcr
                     lslb
                     ldd       b,y
                     addd      1,s
                     tfr       d,y
                     puls      b,x,pc
-SidOff              fdb       $000,$007,$00E,$100,$107,$10E
+SidVof              fdb       $000,$007,$00E,$100,$107,$10E
 
 ********************************************************************
 * SndInit - both SIDs silent and set up; every voice free.
 *   Exit: carry = error in B.
 ********************************************************************
-SndInit             bsr       SidMap
-                    bcs       six
+SndInit             lda       TSMODE,u            "tempest n": the game without sound (SndOut idle)
+                    cmpa      #'n
+                    beq       sin
+                    lbsr      SidOn
                     ldb       #$19                every register of both SIDs to 0
 si1                 decb
                     clr       b,x
@@ -77,6 +122,7 @@ si2                 bsr       SidReg
                     lda       #SIDVOL
                     sta       $18,x
                     sta       $118,x
+                    lbsr      SidOff
                     leay      SNDVCH,u            no voice owned, no channel voiced
                     ldb       #6+8
                     lda       #$FF
@@ -89,8 +135,8 @@ si4                 clr       ,y+
                     decb
                     bne       si4
                     inc       SNDUP,u
-                    clrb
-six                 rts
+sin                 clrb
+                    rts
 
 ********************************************************************
 * SndExit - every voice gated off, both SIDs' volume 0.
@@ -98,8 +144,7 @@ six                 rts
 SndExit             tst       SNDUP,u
                     beq       sxx
                     clr       SNDUP,u
-                    bsr       SidMap
-                    bcs       sxx
+                    lbsr      SidOn
                     clrb
 se1                 bsr       SidReg
                     clr       4,y
@@ -108,6 +153,7 @@ se1                 bsr       SidReg
                     blo       se1
                     clr       $18,x
                     clr       $118,x
+                    lbra      SidOff
 sxx                 rts
 
 ********************************************************************
@@ -115,15 +161,7 @@ sxx                 rts
 ********************************************************************
 SndOut              tst       SNDUP,u
                     lbeq       sox
-                    lda       SWIN+W.Blk,u        the window: free, or the SIDs' already?
-                    beq       so0
-                    cmpa      #SIDBLK
-                    beq       so0
-                    tst       DRAWNG,u            the text drawing has it: not while the frame is drawn
-                    lbne      sox                 (the window would thrash between the two)
-so0
-                    lbsr       SidMap
-                    lbcs       sox
+                    lbsr      SidOn               (masked until SidOff)
                     stx       SNDBAS,u
                     clr       SNDCH,u
 so1                 ldb       SNDCH,u             channel c: AUDF at POKIMG + 2c, AUDC after it
@@ -235,6 +273,7 @@ sonx                inc       SNDCH,u
                     lda       SNDCH,u
                     cmpa      #8
                     lblo      so1
+                    lbra      SidOff
 sox                 rts
 * channel c is silent: its voice, if it has one, gated off and freed
 soff                ldb       SNDCH,u

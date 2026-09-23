@@ -103,6 +103,52 @@ class Host(CPU6809):
         self.pass_logic, self.pass_rec, self.pass_gly, self.pass_logcyc = False, 0, 0, 0
         self.cp = bytearray(32)             # the integer coprocessor (D8), as JR_Math_Block.v
         self.map_io(0xFEE0, 0xFEFF, self.cp_read, self.cp_write)
+        self.mmuctl = 0                     # $FFA0: the active LUT (bits 1-0), the edited one (5-4)
+        self.map_io(0xFFA0, 0xFFAF, self.mmu_read, self.mmu_write)
+
+    # --- the MMU's registers (sound.a SidOn/SidOff, the user-approved exception) -------------
+    # Only a slot that holds one of the windows OS-9 mapped may be changed, only with interrupts
+    # masked, only in the active LUT, and no os9 call may come while a window holds another block.
+    def mmu_read(self, a):
+        if a == 0xFFA0:
+            return self.mmuctl
+        if a >= 0xFFA8:
+            base = (a - 0xFFA8) * 8192
+            return self.mapped.get(base, 0xFF)          # (a slot that is not a window: not modelled)
+        return 0
+
+    def mmu_write(self, a, v):
+        if not self.cc & 0x10:
+            self.errors.append("MMU $%04X written with IRQ unmasked" % a)
+        if a == 0xFFA0:
+            self.mmuctl = v
+            return
+        if a < 0xFFA8:
+            self.errors.append("MMU $%04X written" % a)
+            return
+        if (self.mmuctl >> 4) & 3 != self.mmuctl & 3:
+            self.errors.append("an MMU slot written in a LUT that is not the active one")
+            return
+        base = (a - 0xFFA8) * 8192
+        if base not in self.mapped:
+            self.errors.append("MMU slot %d written: not a window OS-9 mapped" % (a - 0xFFA8))
+            return
+        self.block(self.mapped[base])[:] = self.mem[base:base + 8192]
+        self.mapped[base] = v
+        self.mem[base:base + 8192] = self.block(v)
+        self.on_map(base, v)
+
+    def on_map(self, base, block):
+        pass
+
+    def windows_own(self):
+        """at an os9 call: every window must hold the block OS-9 gave it"""
+        own = getattr(self, "own", None)
+        if own is None:
+            return
+        for base, b in self.mapped.items():
+            if own.get(base, b) != b:
+                self.errors.append("os9 call with window $%04X holding block $%02X" % (base, b))
 
     def cp_read(self, a):
         if not self.cc & 0x10:
@@ -169,6 +215,7 @@ class Host(CPU6809):
         if self.mem[pc] == 0x10 and self.mem[pc + 1] == 0x3F:
             fn = self.mem[pc + 2]
             self.pc = (pc + 3) & 0xFFFF
+            self.windows_own()
             self.calls[fn] = self.calls.get(fn, 0) + 1
             self.dma_halt()
             c0 = self.cycles
@@ -221,6 +268,8 @@ class Host(CPU6809):
                 return 207
             base = free[0]
             self.mapped[base] = self.x
+            self.own = getattr(self, "own", {})
+            self.own[base] = self.x
             self.mem[base:base + 8192] = self.block(self.x)
             self.u = base
             self.cost(220)
@@ -230,6 +279,7 @@ class Host(CPU6809):
             if base in self.mapped:
                 self.block(self.mapped[base])[:] = self.mem[base:base + 8192]
                 del self.mapped[base]
+                getattr(self, "own", {}).pop(base, None)
                 self.mem[base:base + 8192] = bytes(8192)
             self.cost(220)
             return 0

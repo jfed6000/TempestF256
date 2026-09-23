@@ -50,17 +50,6 @@ class SndHost(Host):
         self.remaps = 0
 
     def os9(self, fn):
-        if fn == osrun.F_MAPBLK and self.x == SIDBLK:
-            err = super().os9(fn)
-            if not err:
-                self.sidbase = self.u
-                self.remaps += 1
-                if self.u not in self.taps:
-                    self.taps.add(self.u)
-                    base = self.u
-                    self.map_io(base, base + 0x1FF, lambda a, b=base: self.sid_r(a, b),
-                                lambda a, v, b=base: self.sid_w(a, v, b))
-            return err
         if fn == I_READ:
             if not self.pending:
                 return E_NOTRDY
@@ -72,6 +61,17 @@ class SndHost(Host):
             if k:
                 self.pending.append(k)
         return super().os9(fn)
+
+    def on_map(self, base, block):
+        """the MMU put a block in a window's slot (sound.a SidOn): tap the SIDs there"""
+        if block != SIDBLK:
+            return
+        self.sidbase = base
+        self.remaps += 1
+        if base not in self.taps:
+            self.taps.add(base)
+            self.map_io(base, base + 0x1FF, lambda a, b=base: self.sid_r(a, b),
+                        lambda a, v, b=base: self.sid_w(a, v, b))
 
     def stat(self, get, code):
         if get and code == SS_READY:
@@ -142,10 +142,6 @@ def main():
             pc = h.pc
             if h.mem[pc] == 0x10 and h.mem[pc + 1] == 0x3F and h.mem[pc + 2] == osrun.F_SLEEP \
                     and h.x == 2 and h.sidbase is not None:
-                if not h.sid_here(h.sidbase):   # the text holds the window: SndOut waited (or ran
-                    deferred += 1               # before the text took it); nothing to check
-                    h.step()
-                    continue
                 checked += 1
                 img = h.mem[DATA + POKIMG:DATA + POKIMG + 16]
                 seq = 0 if a.game else h.mem[DATA + sym["TSSEQ"]]
@@ -182,7 +178,7 @@ def main():
     except Exit as e:
         print("exit: %s" % (e,))
     print("ran %.1f s: %d passes checked, %d wrong; %d SID writes; %d re-gates; at most %d channels"
-          " at once; the SIDs mapped %d times" % (h.cycles / HZ, checked, bad, h.writes, h.gates_off_on,
+          " at once; SidOn %d times" % (h.cycles / HZ, checked, bad, h.writes, h.gates_off_on,
                                                  maxvoices, h.remaps))
     if deferred:
         print("passes that ended with the text in the window (not checked): %d" % deferred)

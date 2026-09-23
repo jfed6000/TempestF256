@@ -1290,6 +1290,40 @@ passes checked, 0 wrong**, up to 4 channels at once, 996 re-gates, the SIDs mapp
 The Wildbits MAME: the game and `tempest s` as before (no sound there). Module 38,714 bytes, on
 both disk images.
 
+## Sound slower on hardware; the SIDs through the MMU (2026-09-23) — untested on hardware
+
+**K2, `a125158` (sound in the game): 1,758 game frames, 6,304 passes in 108 s** (user: "definitely
+slower with sound on"): 16.3 game frames and **58.4 passes a second, ~176 ticks lost (2.7%)**
+against 0.7% the run before (0.7% was 245 s of play; this is 108 s, other levels: not a clean
+comparison). The model predicted no extra loss, so something in the sound path costs more on the
+hardware than the model thinks; not identified.
+
+**The user's call: reach the SIDs through the MMU directly** — the third absolute-address exception,
+`$FFA0`-`$FFAF` (`tools/piccheck.py` knows it). `SidOn`: interrupts masked, `$FFA0` saved and its
+edit LUT set to the active one (bits 5-4 = bits 1-0, from `TyVKy2K2x1_MMU_Register.v`), **window
+A's slot** saved and given block `$C4`; `SidOff` puts both back and the mask. Window A because only
+the main loop uses vector RAM, and `SndOut` is part of it; with interrupts masked no task switch can
+reload the MMU. So no `F$MapBlk` for sound at all, no sharing of the service window with the text
+(`SndOut` no longer waits for it). Interrupts are masked for `SndOut`'s whole run, ~150 µs a pass
+(650 at most, before; less now without the remap). `osrun.py` models the MMU registers and fails a
+slot change with interrupts unmasked, in another LUT, or of a slot that is not a window OS-9
+mapped, and any os9 call while a window holds another block. **`tempest n`**: the game without
+sound, for comparing on one image.
+
+Host: `sndtest.py` 2,699 passes and, `--game`, **7,146 passes (all of them now), 0 wrong**, up to
+five channels at once; `osrun.py` 60 s: no errors, `F$MapBlk` back to 140 a minute, 15.0 game
+frames a second, 46 ticks lost (the model never charged the remaps much, so it shows no gain). The
+Wildbits MAME: `tempest`, `tempest n` and `tempest s` as before. Module 38,792 bytes, on both disk
+images. **The run that says which it is: `tempest` and `tempest n`, played alike, sign-offs
+compared.**
+
+Considered (user's question): shrinking the module to leave a second free block, so the SIDs and
+the text bitmap could both stay mapped. The module would have to fit 4 blocks less 768, 32,000
+bytes, against 38,792: 6,800 bytes out, of which the vector ROM (4,096) would have to move into
+window A (the plan's fallback), which is full, so the record batch and the text list move into the
+data area, also nearly full; and ~2,700 more from tables and code. Not started: first see whether
+the MMU version cures the slowdown at all.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
