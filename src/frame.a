@@ -35,6 +35,7 @@ BUDLOG              equ       0                   what a logic pass leaves for t
                     ifndef    HIRES
 HIRES               equ       1                   the line bitmaps 640x240 (gfx.a; branch hires640)
                     endc
+AVCOLL              equ       1                   small shapes collapsed (avg.a AvShp; status.md "Small shapes collapsed")
                     ifndef    RECUS
                     ifne      HIRES
 RECUS               equ       170                 a record, interpreted, made 640 (~9 us) and drawn

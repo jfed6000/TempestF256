@@ -87,6 +87,25 @@ AV.LEY	equ	111			its end's row
 AV.LCL	equ	112			its CLUT index (0: none yet; a record's is never 0)
 AV.RMAX	equ	113			records this batch holds: the caller's before AvgRun (0: RBATCH),
 *					and AvgFlush may change it for the next batch (1-255)
+AV.SHP	equ	114			2: AvShp: the shape's AvSTab entry
+AV.STAB	equ	116			2: AvSTab (module; AVCOLL)
+AV.SMAP	equ	118			2: AvSMap (module; AVCOLL)
+
+* AvSTab's entries (avgtab.a, tools/avgview.py shape_table)
+SH.TGT	equ	0			2: the target (word address); $FFFF ends the table
+SH.QMX	equ	2			2: Q below this collapses it
+SH.BSL	equ	4			the highest binary scale that may
+SH.X0	equ	5			2: the box's x min, then y max, x max, y min (v_eff, y up)
+SH.Y1	equ	7
+SH.X1	equ	9
+SH.Y0	equ	11
+SH.NX	equ	13			2: the net move, x then y
+SH.NY	equ	15
+SH.LC	equ	17			the last lit stroke's colour << 4 ($FF: the caller's)
+SH.LI	equ	18			and its intensity ($FF: STAT's)
+SH.AC	equ	19			the colour << 4 it leaves ($FF: unchanged)
+SH.AI	equ	20			the intensity it leaves ($FF: unchanged)
+SHLEN	equ	21
 
 * AvgRun - interpret the display list in window A once.
 * In: U = the data area (VWIN set; page-aligned).  Out: AVGPG+AV.TCNT texts at window A + $1800,
@@ -117,6 +136,12 @@ AvgRun	pshs	u,dp
 	stx	<AV.GMAP
 	leax	AvGTab,pcr
 	stx	<AV.GTAB
+	ifdef	AVCOLL
+	leax	AvSTab,pcr
+	stx	<AV.STAB
+	leax	AvSMap,pcr
+	stx	<AV.SMAP
+	endc
 	leax	AvLoop,pcr		the jump table: 0 VCTR (not used: tested first), 1 HALT, 2 SVEC,
 	stx	<AV.JT			3 STAT/SCAL, 4 CNTR, 5 JSRL, 6 RTSL, 7 JMPL
 	leax	AvHalt,pcr
@@ -731,8 +756,23 @@ _JS1	ldx	<AV.GMAP
 	leax	d,x
 	lda	,x
 	cmpa	#$FF
+	ifdef	AVCOLL
+	lbne	AvGlyph
+	else
 	bne	AvGlyph
-_JS2	ldd	<AV.JMP
+	endc
+_JS2
+	ifdef	AVCOLL
+	ldd	<AV.T			a target AvSTab may hold: AvShp
+	cmpd	#AvSLo
+	blo	_JS3
+	cmpd	#AvSHi
+	bhi	_JS3
+	lbsr	AvShp			a small shape: not run (carry clear, Y past the JSRL)
+	lbcc	AvLoop
+_JS3
+	endc
+	ldd	<AV.JMP
 	subd	#1
 	std	<AV.JMP
 	beq	AvStop
@@ -869,6 +909,174 @@ _GL3	ldd	<AV.COL+1
 	lbsr	AvSetQ
 _GL4	leay	2,y
 	lbra	AvLoop
+
+	ifdef	AVCOLL
+* AvShp - a JSRL to AV.T: if the target is in AvSTab, at a binary scale up to its SH.BSL and a Q
+* below its SH.QMX (drawn under COLL_PX pixels across), it is not run: its box becomes a block, a
+* horizontal record a row (clipped: rows off the bitmap dropped, columns held to it), in its last
+* lit stroke's CLUT (nothing at intensity 0); the beam moves by its net move; the colour and
+* intensity it leaves are set.  No control transfer is counted.  Carry clear: done, Y past the
+* JSRL; carry set: run it.  PortAVG(collapse=True) is the specification.
+AvShp	ldd	<AV.Q			a Q too big for any: no search
+	cmpd	#AvSQMx
+	bhs	_SHno
+	ldd	<AV.T
+	subd	#$0800
+	cmpd	#$0800			(below $800 wraps high)
+	bhs	_SHno
+	lsra				D >> 4: the 16-word bucket, 0-127
+	rorb
+	lsra
+	rorb
+	lsra
+	rorb
+	lsra
+	rorb
+	ldx	<AV.SMAP
+	ldb	b,x			the bucket's first entry
+	cmpb	#$FF
+	beq	_SHno			none
+	lda	#SHLEN
+	mul
+	addd	<AV.STAB
+	tfr	d,x
+	ldd	<AV.T
+_SH1	cmpd	,x
+	beq	_SH2
+	blo	_SHno			(by target; $FFFF ends it)
+	leax	SHLEN,x
+	bra	_SH1
+_SHno	orcc	#$01			run it
+	rts
+_SH2	lda	<AV.BS
+	cmpa	SH.BSL,x
+	bhi	_SHno
+	ldd	<AV.Q
+	cmpd	SH.QMX,x
+	bhs	_SHno
+	stx	<AV.SHP
+	ldb	SH.LI,x			the CLUT
+	cmpb	#$FF
+	bne	_SH3
+	ldb	<AV.INT
+_SH3	lda	SH.LC,x
+	cmpa	#$FF
+	bne	_SH4
+	lda	<AV.COLR
+_SH4	stb	<AV.CLUT
+	ora	<AV.CLUT
+	sta	<AV.CLUT
+	ldd	<AV.COL			the beam, kept in AV.P0-P0+5 (the clip's; not used here)
+	std	<AV.P0
+	ldd	<AV.COL+2
+	std	<AV.P0+2
+	ldd	<AV.ROW+1
+	std	<AV.P0+4
+	ldd	SH.X0,x			the top left: LC, LR
+	std	<AV.VX
+	ldd	SH.Y1,x
+	std	<AV.VY
+	lbsr	AvMove
+	ldd	<AV.COL
+	std	<AV.LC
+	ldd	<AV.ROW
+	std	<AV.LR
+	lbsr	_SHbm
+	ldd	SH.X1,x			the bottom right: MA, MB
+	std	<AV.VX
+	ldd	SH.Y0,x
+	std	<AV.VY
+	lbsr	AvMove
+	ldd	<AV.COL
+	std	<AV.MA
+	ldd	<AV.ROW
+	std	<AV.MB
+	lbsr	_SHbm
+	ldd	SH.NX,x			the net move
+	std	<AV.VX
+	ldd	SH.NY,x
+	std	<AV.VY
+	lbsr	AvMove
+	lda	<AV.CLUT
+	bita	#$0F
+	beq	_SH9			intensity 0: nothing drawn
+	ldd	<AV.MA			columns: all off, or held to 0-319
+	bmi	_SH9
+	cmpd	#BMW-1
+	ble	_SH5
+	ldd	#BMW-1
+	std	<AV.MA
+_SH5	ldd	<AV.LC
+	bpl	_SH6
+	clra
+	clrb
+	std	<AV.LC
+	bra	_SH7
+_SH6	cmpd	#BMW-1
+	bgt	_SH9
+_SH7	ldd	<AV.LR			rows: held to 0-239 (those off the bitmap are dropped)
+	bpl	_SHr1
+	clra
+	clrb
+	std	<AV.LR
+_SHr1	cmpd	#BMH-1
+	bgt	_SH9
+	ldd	<AV.MB
+	bmi	_SH9
+	cmpd	#BMH-1
+	ble	_SHr2
+	ldd	#BMH-1
+	std	<AV.MB
+_SHr2	ldd	<AV.LR			a record a row, top to bottom
+	cmpd	<AV.MB
+	bgt	_SH9
+	ldx	<AV.RPTR
+	stb	4,x
+	stb	5,x
+	stb	<AV.LEY
+	ldd	<AV.LC
+	std	,x
+	ldd	<AV.MA
+	std	2,x
+	std	<AV.LEX
+	lda	<AV.CLUT
+	sta	<AV.LCL
+	clrb
+	std	6,x
+	leax	8,x
+	stx	<AV.RPTR
+	dec	<AV.RLFT
+	bne	_SH8
+	lbsr	AvFlsh
+_SH8	ldd	<AV.LR
+	addd	#1
+	std	<AV.LR
+	bra	_SHr2
+_SH9	ldx	<AV.SHP			the colour and intensity it leaves
+	lda	SH.AC,x
+	cmpa	#$FF
+	beq	_SHa
+	sta	<AV.COLR
+_SHa	lda	SH.AI,x
+	cmpa	#$FF
+	beq	_SHb
+	sta	<AV.INT
+_SHb	lda	<AV.COLR
+	ora	<AV.INT
+	sta	<AV.STCL
+	leay	2,y
+	andcc	#$FE
+	rts
+* _SHbm: the beam back from AV.P0, X = the entry again.
+_SHbm	ldd	<AV.P0
+	std	<AV.COL
+	ldd	<AV.P0+2
+	std	<AV.COL+2
+	ldd	<AV.P0+4
+	std	<AV.ROW+1
+	ldx	<AV.SHP
+	rts
+	endc
 
 * AvClip - Cohen-Sutherland on whole pixels, as PortAVG's clip_int: (LC, LR) to the beam, into
 * AV.P0/AV.P1 (x, y: 16 bits each).  Carry set: nothing left.

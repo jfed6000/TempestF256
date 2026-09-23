@@ -1111,6 +1111,58 @@ remedy (a port simplification, the user's call): draw only some of the copies. T
 is clean in the model: dark blue text on black, which a capture device smears most; to be
 checked on a direct monitor.
 
+## Small shapes collapsed (2026-09-23, host only) — for review
+
+Built by request and measured. **In the module on branch `hires640`** (`frame.a` sets `AVCOLL`,
+beside `HIRES`; without it avg.a assembles as before), on both disk images (targeted copy, copied
+back and compared). Untested on hardware. The Wildbits MAME: title, coin, start, the rating
+screen, `q` and the sign-off, as before. **The host model** (`osrun.py --seconds 60`, the same
+estimates, `RECUS` 170): **13.7 → 14.5 game frames a second**; 166 → 147 records a frame; passes
+median 10.6 → 10.4 ms, max 17.7 → 16.9; ticks lost 12 → 13 in 3,600 (the same few passes near the
+tick); every check right. The gain follows the records, not the interpreter's 22%: the split frame
+charges each record its estimate, whose real cost (~102 µs interpreted, against ~105 before) is
+unchanged. Lowering `RECUS` is the separate next step, one change a hardware run.
+
+**The rule** (the specification is `PortAVG(collapse=True)`): a JSRL to one of 20 ROM pictures
+(`shape_table`: the game's non-character targets that are only VCTR/SVEC/STAT/JMPL, 9 strokes or
+more) is not run when the picture would be drawn under **2 px across**. Instead: a block of its box,
+one horizontal record a row, in the CLUT of its **last lit stroke** (it paints on top; the first
+stroke's colour and the stroke majority both came out wrong, e.g. $ACA's 9 colour-8 strokes under
+8 yellow ones); the beam moves by its net move × Q; the colour and intensity it leaves are set. The
+test is a table compare, no multiply: Q < `qmax` = ⌈2·65536 / E⌉ (E the box's larger side, v_eff)
+and bs ≤ `bslim` (above it the AVG's clamps change the geometry: bs 5-7). The beam ends exactly
+where running the shape leaves it (every captured frame: the records outside collapsed shapes and
+the end state are identical).
+
+**Why it pays:** 59% of play's records are dots from enemies deep in the tube, whose 16-45 strokes
+round onto 2-3 pixels. Measured first in a prototype (at 1, 2 and 3 px; dot or block): 1 px saves
+nothing visible or measurable, a single dot at 2 px visibly loses the enemies, **the block at 2 px
+changes 2.7 pixels a play frame** and is hard to tell from the exact picture; 3 px starts to show.
+
+**Built:** `avgview.py` (`shape_walk`, `shape_table`, `--port --collapse`, `--tables` also writes
+the table), `avgtab.a` (`AvSTab` 20 × 21 bytes, `AvSMap` 128 bytes, all under `ifdef AVCOLL`),
+`avg.a` (`AvShp`, a range check at `_JS2`), `avgtest.py --collapse` (and its fuzz calls the shapes
+at every binary scale). Module with `AVCOLL`: **37,662 bytes** of 40,192 (+914); `make pic` clean.
+
+| `avgtest.py`, 8 MHz | Play median | Play 95% | Attract median | Attract 95% | Max |
+|---|---:|---:|---:|---:|---:|
+| Before | 16.87 ms | 22.10 | 16.97 | 41.89 | 47.28 |
+| **`AVCOLL`** | **13.18** | **20.19** | **14.81** | 42.25 | 47.64 |
+| `AVCOLL --sw` | 14.43 | 22.61 | 16.19 | 45.43 | 50.82 |
+
+All 6,282 frames byte-exact against the specification (both multiplies); `--fuzz 10000` none failed
+(and `--sw --batch 0 --seed 7`), ~29,000 shapes collapsed in each. Play also sends fewer records:
+median **129 against 161** (vectors run: 225 against 394), about another 0.8-1 ms of driver at the
+guessed 25-30 µs a record. The attract logo costs ~0.36 ms more (its ~135 JSRLs pay the range
+check). Found on the way: the first table held three 6-8-stroke pieces the logo calls large
+($FC4, $FD1, $FEA: tested 76 times a logo frame, almost never collapsed), which made the logo
+1.4-2 ms slower; hence the 9-stroke minimum, the empty-bucket marks and the range check.
+
+**For review:** the look (the prototype's side-by-side crops were sent in the session; `avgview.py
+--port --collapse --png DIR --frames N` draws any frame), whether to put `AVCOLL` in the module's
+build, and then the budget estimates (`RECUS` a record) the split frame charges, which the faster
+records would let come down.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

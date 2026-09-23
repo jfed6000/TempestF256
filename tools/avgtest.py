@@ -59,14 +59,14 @@ AvgFlush\tstb\t$%04X
 """ % FLUSH_PORT
 
 
-def build(sw=False, batch=None):
+def build(sw=False, batch=None, collapse=False):
     os.makedirs(BUILD, exist_ok=True)
     wrap = os.path.join(BUILD, "avgtest.a")
     open(wrap, "w").write(WRAPPER)
     binp, lst = os.path.join(BUILD, "avgtest.bin"), os.path.join(BUILD, "avgtest.lst")
     r = subprocess.run(["lwasm.orig", "--6809", "--format=raw", "--pragma=nosymbolcase", "-I", SRC,
                         "-o", binp, "--list=" + lst, "--symbols", wrap] + (["-DAVGSWM"] if sw else []) +
-                       (["-DRBATCH=%d" % batch] if batch else []),
+                       (["-DRBATCH=%d" % batch] if batch else []) + (["-DAVCOLL"] if collapse else []),
                        capture_output=True, text=True)
     if r.returncode:
         sys.exit((r.stdout + r.stderr)[:4000] + "\nsrc/avg.a does not assemble")
@@ -157,7 +157,7 @@ def word(w):
     return bytes((w & 0xFF, (w >> 8) & 0xFF))
 
 
-def random_list(rng, rom):
+def random_list(rng, rom, shapes=()):
     """A random display list at vector RAM 0, with a subroutine at $400 (words), ending JMPL 0.
     Half the lists are dot-heavy: zero vectors, two colours, and jumps that leave the beam just
     off an edge of the bitmap (the redundant-dot rule and the clip meeting)."""
@@ -202,7 +202,14 @@ def random_list(rng, rom):
                 out += (word(d) + word(0) + word(0) + word(6 << 13) +
                         word(-av.sext(d, 13) & 0x1FFF) + word(0) + word(0) + word(6 << 13))
             elif k < 0.85:
-                out += word(0xA000 | rng.choice(chars))                                 # a character
+                if shapes and rng.random() < 0.5:                  # a small shape (--collapse), at
+                    bs = rng.choice((0, 1, 2, 3, 4, 5, 6, 7))       # a scale that may collapse it
+                    out += word(0x7000 | (bs << 8) | rng.choice((0, rng.randrange(256), 0xFF)))
+                    if rng.random() < 0.3:
+                        out += word(0x6000 | rng.randrange(0x1000))                     # STAT
+                    out += word(0xA000 | rng.choice(shapes))
+                else:
+                    out += word(0xA000 | rng.choice(chars))                             # a character
             elif k < 0.9 and not sub:
                 out += word(0xA000 | 0x400)                                             # the subroutine
             else:
@@ -221,12 +228,15 @@ def fuzz(a, code, labels):
     rng = random.Random(a.seed)
     rigs = [Rig(code, labels, lay) for lay in LAYOUTS]
     rom = open(os.path.join(SRC, "vrom.bin"), "rb").read()
-    port = av.PortAVG(rom)
+    port = av.PortAVG(rom, collapse=a.collapse)
+    shapes = sorted(port.shapes) if a.collapse else ()
     fails = 0
+    collapsed = 0
     for i in range(a.fuzz):
-        vram = random_list(rng, rom)
+        vram = random_list(rng, rom, shapes)
         rig = rigs[i % 2]
         recs, texts = port.run(vram)
+        collapsed += port.stats["collapsed"]
         _, gtexts, ended = rig.run(vram)
         bad = list(rig.errors)
         if rig.recs != [tuple(r) for r in recs]:
@@ -244,7 +254,8 @@ def fuzz(a, code, labels):
                 print("FAIL case %d:" % i)
                 for b in bad[:4]:
                     print("   ", b)
-    print("fuzz: %d random lists, %d failed" % (a.fuzz, fails))
+    print("fuzz: %d random lists, %d failed%s" % (a.fuzz, fails, (", %d shapes collapsed" % collapsed)
+                                                  if a.collapse else ""))
     sys.exit(1 if fails else 0)
 
 
@@ -259,12 +270,14 @@ def main():
     ap.add_argument("--sw", action="store_true", help="the software multiply (AVGSWM)")
     ap.add_argument("--batch", type=int, help="records a batch (RBATCH; the module's, not 255); 0 = a random"
                     " size set by AvgFlush for each next batch (AV.RMAX, as the module's AvgFlush does)")
+    ap.add_argument("--collapse", action="store_true", help="small shapes collapsed (AVCOLL; PortAVG's"
+                    " collapse=True)")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args()
 
     global BATCH_RANDOM
     BATCH_RANDOM = a.batch == 0
-    code, labels = build(a.sw, a.batch or None)
+    code, labels = build(a.sw, a.batch or None, a.collapse)
     print("avg.a: %d bytes of code, %d with the glyph tables (VROM excluded)" %
           (labels["AvGMap"] - labels["AvgRun"], labels["VROM"] - labels["AvgRun"]))
     if a.fuzz:
@@ -278,7 +291,7 @@ def main():
         k = 0
         for item in av.read_capture(cap):
             if item[0] == "rom":
-                port = av.PortAVG(item[1])
+                port = av.PortAVG(item[1], collapse=a.collapse)
                 continue
             _, n, vram, cram = item
             if n < a.first:

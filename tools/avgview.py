@@ -402,7 +402,7 @@ class PortAVG:
     MAXTXT = 256
     DROPDOTS = True            # False: every record (for --compare against the float pipeline)
 
-    def __init__(self, rom, glyphs=True):
+    def __init__(self, rom, glyphs=True, collapse=False):
         self.rom = rom
         self.gmap = {}             # target word -> glyph index (first VGMSGA entry using it)
         self.gtab = {}             # (index, big) -> (dcol, drow, scale_after, intensity or 0)
@@ -411,6 +411,7 @@ class PortAVG:
             for i in range(NGLYPHS):
                 t = vg_word(bytes(4096) + rom, VGMSGA_W + i) & 0x1FFF
                 self.gmap.setdefault(t, i)
+        self.shapes = {e["t"]: e for e in shape_table(rom)} if collapse else {}
 
     def run(self, vram, rom=None):
         mem = vram + (rom or self.rom)
@@ -421,7 +422,7 @@ class PortAVG:
         col, row = 160 << 8, 120 << 8
         recs, texts = [], []
         st = {"instructions": 0, "vectors": 0, "glyphs": 0, "clipped": 0, "dropped": 0, "full": 0,
-              "ended": 0, "centred": 0, "statint": 0, "dots": 0}
+              "ended": 0, "centred": 0, "statint": 0, "dots": 0, "collapsed": 0}
         self.trace = []
         jumps = self.MAXJUMPS
         while jumps:
@@ -490,6 +491,29 @@ class PortAVG:
                     if after:
                         bs, scale = after
                         q = q_for(scale, bs)
+                    continue
+                e = self.shapes.get(t)
+                if e is not None and bs <= e["bslim"] and q < e["qmax"]:
+                    # a small shape (shape_table): not run.  A block of its box, a horizontal
+                    # record a row, in its last lit stroke's CLUT; the beam moved by its net move.
+                    st["collapsed"] += 1
+                    tm = lambda v: -((-v * q) >> 8) if v < 0 else (v * q) >> 8
+                    x0, y1, x1, y0 = e["box"]
+                    cl, cr = pix(wrap(col + tm(x0), 24)), pix(wrap(col + tm(x1), 24))
+                    rt, rb = pix(wrap(row - tm(y1), 24)), pix(wrap(row - tm(y0), 24))
+                    inten = intensity if e["li"] is None else e["li"]
+                    clut = ((color & 0xF if e["lc"] is None else e["lc"]) << 4) | inten
+                    if inten:
+                        for r in range(rt, rb + 1):
+                            c = clip_int(cl, r, cr, r)
+                            if c is not None:
+                                recs.append(c + (clut,))
+                    col = wrap(col + tm(e["net"][0]), 24)
+                    row = wrap(row - tm(e["net"][1]), 24)
+                    if e["ac"] is not None:
+                        color = e["ac"]
+                    if e["ai"] is not None:
+                        intensity = e["ai"]
                     continue
                 jumps -= 1
                 stack[sp & 3] = pc
@@ -636,6 +660,93 @@ def write_png(path, recs, cram):
                 + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
 
 
+# Small shapes (PortAVG(collapse=True), avg.a's AVCOLL): the ROM pictures the game JSRLs to (every
+# non-character target in avg_play.bin and avg_attract.bin), of which shape_table keeps the simple
+# ones of at least COLL_MINV vectors.  Drawn less than COLL_PX pixels across, one is not run: a block
+# of its box in its last lit stroke's CLUT.  A target left out is only run, as before.
+COLL_TARGETS = (0x937, 0x93F, 0xA55, 0xA61, 0xA7C, 0xA91, 0xAAD, 0xACA, 0xB14, 0xB6F, 0xBC0, 0xC15,
+                0xC66, 0xC7D, 0xC94, 0xCAB, 0xCD8, 0xCFA, 0xD0D, 0xD20, 0xD39, 0xD51, 0xD6A, 0xD7F,
+                0xD82, 0xD84, 0xD86, 0xD88, 0xD8A, 0xD8C, 0xD8D, 0xDD7, 0xFA7, 0xFBD, 0xFC4, 0xFD1,
+                0xFE0, 0xFEA, 0xFF9)
+COLL_PX = 2
+COLL_MINV = 9                      # fewer: short pieces the logo calls large (cost more than they save)
+COLL_LEN = 21                       # bytes an AvSTab entry
+
+
+def shape_walk(rom, t, bs):
+    """A ROM routine at word t, at binary scale bs, read without running it: None unless it is
+    only VCTR, SVEC, STAT (colour, intensity) and JMPL within the ROM, ending at RTSL.  Else its
+    vectors' count; its box (x min, y max, x max, y min) and net move in v_eff units (y up) over
+    the vectors with Z > 0; its last such vector's colour and intensity (None: the caller's when
+    it runs); the colour and intensity it leaves (None: unchanged)."""
+    mem = bytes(4096) + rom
+    pc, colour, inten = t, None, None
+    x = y = n = 0
+    pts, last = [], (None, 0)
+    for _ in range(512):
+        w = vg_word(mem, pc)
+        pc += 1
+        op = w >> 13
+        if op in (0, 2):
+            if op == 0:
+                w2 = vg_word(mem, pc)
+                pc += 1
+                z = w2 >> 13
+                ex, ey = veff_vctr(sext(w2 & 0x1FFF, 13), sext(w & 0x1FFF, 13), bs)
+            else:
+                z = (w >> 5) & 7
+                ex, ey = veff_svec(sext(w & 0x1F, 5), sext((w >> 8) & 0x1F, 5), bs)
+            n += 1
+            if z:
+                pts += [(x, y), (x + ex, y + ey)]
+                last = (colour, inten if z == 1 else z << 1)
+            x, y = x + ex, y + ey
+        elif op == 3 and not w & 0x1000:
+            if w & 0x800:
+                colour = w & 0xF
+            else:
+                inten = (w >> 4) & 0xF
+        elif op == 6:
+            break
+        elif op == 7 and (w & 0x1FFF) >= 0x800:
+            pc = w & 0x1FFF
+        else:
+            return None                         # SCAL, CNTR, HALT, JSRL, JMPL out of the ROM
+    else:
+        return None
+    box = (min(p[0] for p in pts), max(p[1] for p in pts), max(p[0] for p in pts),
+           min(p[1] for p in pts)) if pts else (0, 0, 0, 0)
+    return {"n": n, "box": box, "net": (x, y), "lc": last[0], "li": last[1], "ac": colour,
+            "ai": inten}
+
+
+def shape_table(rom):
+    """AvSTab's entries, sorted by target: each COLL_TARGETS routine that shape_walk reads at bs 0,
+    of COLL_MINV vectors or more.  bslim: the highest binary scale at which its box and net move
+    are still bs 0's (above it the AVG's clamps change them; not collapsed there).  qmax: collapsed
+    while Q is below it, i.e. while the box's larger side E (v_eff) is under COLL_PX pixels:
+    E * Q < COLL_PX * 65536."""
+    out = []
+    for t in COLL_TARGETS:
+        s = shape_walk(rom, t, 0)
+        if s is None or s["n"] < COLL_MINV:
+            continue
+        bslim = 0
+        while bslim < 7:
+            s2 = shape_walk(rom, t, bslim + 1)
+            if s2 is None or (s2["box"], s2["net"]) != (s["box"], s["net"]):
+                break
+            bslim += 1
+        x0, y1, x1, y0 = s["box"]
+        e = max(x1 - x0, y1 - y0)
+        qmax = 0xFFFF if e == 0 else min(0xFFFF, -(-COLL_PX * 65536 // e))
+        for v in s["box"] + s["net"]:
+            if abs(v) >= 0x1000:                # AvMove's software multiply takes |v| to $1000
+                sys.exit("shape %03X: a box or net move of %d" % (t, v))
+        out.append(dict(s, t=t, bslim=bslim, qmax=qmax))
+    return out
+
+
 def write_tables(path, rom):
     """src/avgtab.a: AvGMap (character routine -> glyph) and AvGTab (each glyph's advance, the scale
     it leaves, its intensity), both sizes, from glyph_table()."""
@@ -672,6 +783,33 @@ def write_tables(path, rom):
             b.append(gint)
             out.append("\tfcb\t" + ",".join("$%02X" % v for v in b) + "\t\t%d %s" %
                        (i, "big" if big else "normal"))
+    st = shape_table(rom)
+    h = lambda v: "$%04X" % (v & 0xFFFF)
+    b = lambda v: "$FF" if v is None else "$%02X" % v
+    out += ["* Small shapes (avg.a AvShp, assembled with AVCOLL): shape_table()'s %d entries of %d"
+            % (len(st), COLL_LEN),
+            "* bytes, by target, then $FFFF: the target; Q below this collapses it; the highest",
+            "* binary scale that may; its box (x min, y max, x max, y min) and net move (x, y), v_eff,",
+            "* y up; its last lit stroke's colour << 4 and intensity ($FF: the caller's); the colour",
+            "* << 4 and intensity it leaves ($FF: unchanged).  AvSMap: per 16 words from $800, the",
+            "* index of its first entry ($FF: none).  Under %d px across (COLL_PX)." % COLL_PX,
+            "* AvSQMx: the largest Q that collapses any of them (AvShp's first test).",
+            "\tifdef\tAVCOLL",
+            "AvSQMx\tequ\t$%04X" % max(e["qmax"] for e in st),
+            "AvSLo\tequ\t$%04X\t\t\tthe lowest and highest targets" % st[0]["t"],
+            "AvSHi\tequ\t$%04X" % st[-1]["t"],
+            "AvSTab"]
+    for e in st:
+        c = lambda v: None if v is None else v << 4
+        out.append("\tfdb\t" + ",".join(h(v) for v in (e["t"], e["qmax"])) + "\n\tfcb\t%d\n\tfdb\t" %
+                   e["bslim"] + ",".join(h(v) for v in e["box"] + e["net"]) + "\n\tfcb\t" +
+                   ",".join(b(v) for v in (c(e["lc"]), e["li"], c(e["ac"]), e["ai"])))
+    out += ["\tfdb\t$FFFF", "AvSMap"]
+    idx = [next((i for i, e in enumerate(st) if 0x800 + 16 * k <= e["t"] < 0x810 + 16 * k), 0xFF)
+           for k in range(128)]
+    for k in range(0, 128, 16):
+        out.append("\tfcb\t" + ",".join("%d" % v for v in idx[k:k + 16]))
+    out.append("\tendc")
     open(path, "w").write("\n".join(out) + "\n")
     print("wrote %s" % path)
 
@@ -751,7 +889,7 @@ def compare(captures, first):
                                            100.0 * off1 / max(ncoord, 1), offmore))
 
 
-def port_stats(captures, first, per_frame):
+def port_stats(captures, first, per_frame, collapse=False):
     rows = []
     for cap in captures:
         rom = None
@@ -759,7 +897,7 @@ def port_stats(captures, first, per_frame):
         for item in read_capture(cap):
             if item[0] == "rom":
                 rom = item[1]
-                port = PortAVG(rom)
+                port = PortAVG(rom, collapse=collapse)
                 continue
             _, n, vram, cram = item
             if n < first:
@@ -808,6 +946,8 @@ def main():
                     help="the port's pipeline (PortAVG): numbers, and with --png its picture")
     ap.add_argument("--first", type=int, default=600,
                     help="with --verify/--compare/--port, skip MAME frames before this (power-up)")
+    ap.add_argument("--collapse", action="store_true",
+                    help="with --port, small shapes collapsed (shape_table; avg.a's AVCOLL)")
     ap.add_argument("--tables", help="write the 6809's glyph tables (src/avgtab.a) and stop")
     ap.add_argument("more", nargs="*", help="more captures, for --verify/--compare/--port")
     a = ap.parse_args()
@@ -823,7 +963,7 @@ def main():
         compare(caps, a.first)
         return
     if a.port and not a.png:
-        port_stats(caps, a.first, a.stats)
+        port_stats(caps, a.first, a.stats, a.collapse)
         return
     if a.port:
         import json
@@ -833,7 +973,7 @@ def main():
         port = None
         for item in read_capture(a.capture):
             if item[0] == "rom":
-                port = PortAVG(item[1])
+                port = PortAVG(item[1], collapse=a.collapse)
                 continue
             _, n, vram, cram = item
             if n in want:

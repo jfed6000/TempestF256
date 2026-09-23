@@ -110,3 +110,106 @@ AvGTab
 	fcb	$00,$04,$F2,$FF,$FD,$1C,$01,$00,$0C		39 big
 	fcb	$00,$04,$F2,$00,$00,$00,$FF,$00,$0C		40 normal
 	fcb	$00,$09,$E4,$00,$00,$00,$FF,$00,$0C		40 big
+* Small shapes (avg.a AvShp, assembled with AVCOLL): shape_table()'s 20 entries of 21
+* bytes, by target, then $FFFF: the target; Q below this collapses it; the highest
+* binary scale that may; its box (x min, y max, x max, y min) and net move (x, y), v_eff,
+* y up; its last lit stroke's colour << 4 and intensity ($FF: the caller's); the colour
+* << 4 and intensity it leaves ($FF: unchanged).  AvSMap: per 16 words from $800, the
+* index of its first entry ($FF: none).  Under 2 px across (COLL_PX).
+* AvSQMx: the largest Q that collapses any of them (AvShp's first test).
+	ifdef	AVCOLL
+AvSQMx	equ	$2000
+AvSLo	equ	$0937			the lowest and highest targets
+AvSHi	equ	$0D8D
+AvSTab
+	fdb	$0937,$0AAB
+	fcb	7
+	fdb	$FFE8,$0000,$0018,$FFEE,$003C,$0000
+	fcb	$FF,$0C,$FF,$FF
+	fdb	$0A61,$2000
+	fcb	5
+	fdb	$FFF8,$0008,$0008,$FFF8,$0000,$0000
+	fcb	$00,$0E,$00,$FF
+	fdb	$0A7C,$1000
+	fcb	6
+	fdb	$FFF0,$0016,$0010,$FFF6,$0000,$000C
+	fcb	$00,$0C,$00,$FF
+	fdb	$0A91,$0800
+	fcb	7
+	fdb	$FFE0,$0020,$0020,$FFE0,$0000,$0000
+	fcb	$00,$0C,$00,$FF
+	fdb	$0AAD,$0400
+	fcb	7
+	fdb	$FFC0,$0040,$0040,$FFC0,$0000,$0000
+	fcb	$00,$0C,$00,$FF
+	fdb	$0ACA,$13B2
+	fcb	6
+	fdb	$FFF5,$000F,$000F,$FFF5,$000B,$FFF5
+	fcb	$10,$FF,$10,$FF
+	fdb	$0B14,$0093
+	fcb	7
+	fdb	$FE20,$01C0,$01A0,$FE40,$0000,$0000
+	fcb	$FF,$FF,$FF,$FF
+	fdb	$0B6F,$0093
+	fcb	7
+	fdb	$FEA0,$01A0,$01A0,$FE20,$01A0,$FF40
+	fcb	$FF,$FF,$FF,$FF
+	fdb	$0BC0,$0093
+	fcb	7
+	fdb	$FE60,$01A0,$0180,$FE20,$0100,$FE20
+	fcb	$FF,$FF,$FF,$FF
+	fdb	$0C15,$0098
+	fcb	7
+	fdb	$FE40,$0160,$01A0,$FE20,$0100,$FE80
+	fcb	$FF,$FF,$FF,$FF
+	fdb	$0C66,$071D
+	fcb	4
+	fdb	$FFD8,$001E,$0020,$FFDC,$FFE2,$001E
+	fcb	$50,$FF,$50,$FF
+	fdb	$0C7D,$071D
+	fcb	5
+	fdb	$FFE2,$0020,$0024,$FFD8,$FFE2,$FFE2
+	fcb	$50,$FF,$50,$FF
+	fdb	$0C94,$071D
+	fcb	5
+	fdb	$FFE0,$0024,$0028,$FFE2,$001E,$FFE2
+	fcb	$50,$FF,$50,$FF
+	fdb	$0CAB,$071D
+	fcb	4
+	fdb	$FFDC,$0028,$001E,$FFE0,$001E,$001E
+	fcb	$50,$FF,$50,$FF
+	fdb	$0CD8,$0400
+	fcb	7
+	fdb	$FFC0,$0040,$0040,$FFC0,$0018,$0000
+	fcb	$20,$FF,$20,$FF
+	fdb	$0D20,$0F10
+	fcb	6
+	fdb	$FFEF,$0011,$0011,$FFEF,$0006,$FFFA
+	fcb	$30,$0C,$30,$FF
+	fdb	$0D39,$0BA3
+	fcb	5
+	fdb	$FFEE,$0016,$0012,$FFEA,$0007,$0003
+	fcb	$30,$0C,$30,$FF
+	fdb	$0D51,$0B22
+	fcb	6
+	fdb	$FFE9,$0017,$0017,$FFE9,$0008,$0000
+	fcb	$30,$0C,$30,$FF
+	fdb	$0D6A,$0BA3
+	fcb	6
+	fdb	$FFEA,$0012,$0016,$FFEE,$0003,$0007
+	fcb	$30,$0C,$30,$FF
+	fdb	$0D8D,$0283
+	fcb	7
+	fdb	$FFA4,$0060,$0070,$FFA8,$0000,$0000
+	fcb	$A0,$0E,$A0,$FF
+	fdb	$FFFF
+AvSMap
+	fcb	255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
+	fcb	255,255,255,0,255,255,255,255,255,255,255,255,255,255,255,255
+	fcb	255,255,255,255,255,255,1,2,255,3,4,255,5,255,255,255
+	fcb	255,6,255,255,255,255,7,255,255,255,255,255,8,255,255,255
+	fcb	255,9,255,255,255,255,10,11,255,12,13,255,255,14,255,255
+	fcb	255,255,15,16,255,17,18,255,19,255,255,255,255,255,255,255
+	fcb	255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
+	fcb	255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
+	endc
