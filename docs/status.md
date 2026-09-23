@@ -1081,6 +1081,9 @@ charged as `TXMUS`. A list that has not changed is no longer copied. The high sc
 first appearance still draws its 148 glyphs, ~21 ticks; the logo's 13 moving texts still redraw
 every frame.
 
+**The K2 with the text fix (user, 2026-09-23): 2,246 game frames, 10,390 passes in 173 s: 13.0
+game frames a second, no ticks lost** (10,380 ticks, within the sign-off's ±60).
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
