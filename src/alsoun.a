@@ -327,31 +327,12 @@ INISOU
 * HAND: hardware register (ALSOUN:350 STA AUDF2+0F)
 	sta	HW_60DF,u			ALSOUN:350 STA AUDF2+0F
 	sta	QT4,u			ALSOUN:351 STA QT4
+* ZPOKST (ALSOUN:352-365), anti-tamper, NEUTRALISED (docs/port-tempest.md 2.4): it checks that
+* RANDOM holds still while the POKEYs are stopped, and the port's generator never does.  Its passing
+* result: QT4 left 0 (above), Y = RANDO2's frozen value, which the port takes as 0 (as the test
+* harness's frozen POKEY reads); A and X are set again below.
 ZPOKST
-	ldb	#$04			ALSOUN:352 ZPOKST:: LDX I,4   ;STOP POKEYS
-	stb	<RX
-* HAND: hardware register (ALSOUN:353 LDA RANDOM)
-	lda	HW_60CA,u			ALSOUN:353 LDA RANDOM
-* HAND: hardware register (ALSOUN:354 LDY RANDO2)
-	ldb	HW_60DA,u			ALSOUN:354 LDY RANDO2
-	stb	<RY
-_ALSOUN_214
-*					ALSOUN:355 BEGIN
-* HAND: hardware register (ALSOUN:356 CMP RANDOM)
-	cmpa	HW_60CA,u			ALSOUN:356 CMP RANDOM
-	bne	_ALSOUN_218			ALSOUN:357 IFEQ ;brALSOUN:357:851
-* HAND: hardware register (ALSOUN:358 CPY RANDO2)
-	ldb	<RY			ALSOUN:358 CPY RANDO2
-	cmpb	HW_60DA,u
-_ALSOUN_218
-*					ALSOUN:359 ENDIF
-	beq	_ALSOUN_222			ALSOUN:360 IFNE   ;HALTED POKEYS? ;brALSOUN:360:852
-	sta	QT4,u			ALSOUN:361 STA QT4
-	clr	<RX			ALSOUN:362 LDX I,0
-_ALSOUN_222
-*					ALSOUN:363 ENDIF
-	dec	<RX			ALSOUN:364 DEX
-	bpl	_ALSOUN_214			ALSOUN:365 MIEND ;brALSOUN:365:853
+	clr	<RY			ALSOUN:352-365, neutralised
 	lda	#$07			ALSOUN:366 LDA I,7
 * HAND: hardware register (ALSOUN:367 STA A,AUDF1+0F)
 	sta	HW_60CF,u			ALSOUN:367 STA A,AUDF1+0F

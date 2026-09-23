@@ -1,0 +1,44 @@
+* hw.a - the hardware the game reads that the port has to make (written by hand).
+*
+* RANDOM and RANDO2, POKEY 1's and 2's random-number registers.  The arcade reads a free-running
+* 17-bit polynomial counter; the port steps a 16-bit xorshift (7, 9, 8) once a read, one state
+* for both POKEYs (RNDST, in the data area; never 0).  tools/xlattest.py gives Atari's code the
+* same sequence, read for read, so the two stay comparable byte for byte.  The two anti-tamper
+* checks that wanted a real POKEY (ZPOKST, ZPONTS) are neutralised where they stand.
+
+* RNDA - the next random byte in A, with the flags a 6809 lda sets (N, Z; V clear; C kept).
+* B, X, Y, U kept.
+RNDA	pshs	cc,b
+	bsr	RNDSTP
+	puls	cc,b
+	tsta
+	rts
+
+* RNDB - the same in B; A, X, Y, U kept.
+RNDB	pshs	cc,a
+	bsr	RNDSTP
+	tfr	a,b
+	puls	cc,a
+	tstb
+	rts
+
+* RNDSTP - x ^= x << 7; x ^= x >> 9; x ^= x << 8.  A = the new low byte.  B clobbered.
+RNDSTP	ldd	RNDST,u			A = high, B = low
+	pshs	d			,s = high, 1,s = low
+	lsra				C = high bit 0
+	rorb				B = x << 7's high byte; C = low bit 0
+	eorb	,s
+	stb	,s			high ^= it
+	lda	#0
+	rora				A = x << 7's low byte
+	eora	1,s			low ^= it
+	lsrb				high >> 1 = x >> 9
+	pshs	b
+	eora	,s+			low ^= x >> 9
+	ldb	,s			high
+	pshs	a
+	eorb	,s+			high ^= low (x << 8)
+	stb	RNDST,u
+	sta	RNDST+1,u
+	leas	2,s
+	rts

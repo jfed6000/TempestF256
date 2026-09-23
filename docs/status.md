@@ -2,13 +2,12 @@
 
 **2026-09-23.** Stage 0 complete; the D6 pilot, the translator and the D6 hand work done, reviewed
 and committed (`07e63de`): the game, hand-finished in `src/`, runs all 2,417 game frames recorded
-from MAME byte-exact against Atari's ROM. **Stage 2's interpreter is done on the host, for review**
-(section "Stage 2 on the host" below): `src/avg.a` walks the display list into `SS.BmLine` records
-and a glyph text list, byte-exact against its specification (`avgview.py`'s `PortAVG`) on every
-captured frame and 20,000 random lists. It costs **16.9 ms a play frame (median) at 8 MHz**, with
-redundant dot records dropped and the coprocessor's multiplier (both decided 2026-09-23): tight
-beside the game and the driver. Nothing has run on
-hardware.
+from MAME byte-exact against Atari's ROM. Stage 2's interpreter is done on the host (section
+"Stage 2 on the host"; its CPU budget and layout approved). **The platform layer is built, for
+review** (section "The platform layer"): `src/tempest`, a 34,693-byte OS-9 module, runs the whole
+game on the host 6809 with the OS-9 calls scripted (`tools/osrun.py`, every frame checked) and
+starts, takes a coin and a start and exits cleanly on NitrOS-9 in the Wildbits MAME. **`SS.Tick` is
+proposed** (plan 6.3). Nothing has run on hardware.
 
 ## Decisions so far
 
@@ -28,6 +27,8 @@ hardware.
   CASCAL's exact overflow path (`MBDV24`) kept, the data area to $B9D; committed `07e63de`.
 - **Stage 2 (user, 2026-09-23):** redundant dot records are dropped (below, "Stage 2 on the
   host"), and **the coprocessor's multiplier is approved**, as D8's divide is: masked per use.
+- **Stage 2's CPU budget and layout (user, 2026-09-23):** approved; heavy frames stretch, no
+  more tuning before `tline S`; `AVGPG` $0C00 and window A as built.
 - **The rest (D2, D5, D6, D7, D9, D10):** the plan's recommendations stand unless the user says
   otherwise. D9 loses its triple-buffer option (all three bitmaps are used).
 
@@ -791,20 +792,131 @@ logo runs at about half speed.
 1. **Redundant dots are dropped** (above). **The coprocessor's multiplier is approved** for
    `AvMove`, as D8's divide: masked per use; the software multiply stays behind `AVGSWM`
    (`CP.MA`, `CP.MB`, `CP.PROD` in `port.d`). Unchecked on hardware, like the divide.
-2. **For review: the CPU budget.** Left: accept stretched frames in heavy scenes (the arcade's own
-   behaviour); further tuning here (perhaps 2 ms); stage 1's `tline S` settles the driver's half.
-3. **For review: the layout**: `AVGPG` $0C00 (one page), window A's record batch and text list.
+2. **The CPU budget: approved (user, 2026-09-23)** as recommended: heavy frames stretch (the
+   arcade's own behaviour); no further interpreter tuning until stage 1's `tline S` gives the
+   driver's per-record cost.
+3. **The layout: approved (user, 2026-09-23)**: `AVGPG` $0C00 (one page), window A's record batch
+   ($1000-$17F7) and text list ($1800-$1DFF).
 4. **Next**, by the plan: stage 2's hardware half (`avgplay`) waits for the fixed core; before it,
    the platform layer, whose SS calls are proposed first.
+
+## The platform layer (2026-09-23, host and MAME) — for review
+
+The module now exists: **`src/tempest`, an OS-9 program module of 34,693 bytes** (the budget is
+40,192), built by `make` in `src/` with the budget and **`make pic` clean**. The game, the
+interpreter and the platform layer run together on the host 6809 with the OS-9 calls played by a
+script, and start, draw text, take input and exit on NitrOS-9 in the Wildbits MAME. **Nothing has
+run on hardware**, and MAME has no line engine, so no line has been drawn by a real driver yet.
+
+### What was built
+
+| File | What it is |
+|---|---|
+| `src/tempest.asm` | The module: header, `data.a`, the platform files, `avg.a` with its tables, the game in link order, `hw.a`, `reloc.a`, the vector ROM. `src/tempest.a` stays the host tests' build of the game alone |
+| `src/makefile` | `make` builds, checks the budget (40,192) and runs `make pic`; `make install DSK=` is the targeted copy |
+| `src/data.a` | The data area, 8K: the arcade's 2K, the port's variables, the hardware shadows, `RELTAB`, `AVGPG`, then the platform's (the last text list, the CLUT buffer, windows, input, the loop) and a 2K stack from `$1800` |
+| `src/platform.a` | Joust's: start-up, window A (`F$AllRAM` + `F$MapBlk`, cleared, `VWIN`), `Map1`, pause (`SS.WSig`), the signal intercept, the terminal options, the exit on every path, the sign-off |
+| `src/frame.a` | The frame loop and **the IRQ on a virtual 246 Hz clock** (below), the game frame, the arcade's reset |
+| `src/input.a` | Keyboard, stick and mouse into the arcade's switch bytes and encoder (D4) |
+| `src/gfx.a` | Three bitmaps, the clear, the flip, **`AvgFlush` into `SS.BmLine`**, the CLUT from colour RAM |
+| `src/text.a` | **The text bitmap (D3)**: the interpreter's text list drawn as glyph masks, only what changed |
+| `src/glyphs.a` | Generated (`tools/glyphs.py --asm`): the 41 glyphs at both sizes as 15-byte mask records |
+| `src/hw.a` | `RANDOM`/`RANDO2` as a generator (below) |
+| `tools/osrun.py` | **The host run**: the module on the host 6809, every `os9` call answered by the script (bitmaps in "physical" blocks, the line engine with avgview's Bresenham, the CLUT, the layers, keys from a script, the coprocessor, a tick every 133,333 cycles); checks after every game frame and pictures |
+| `tools/piccheck.py` | Joust's, with **the coprocessor `$FEE0-$FEFF` as the second approved exception** (D8) |
+
+### The seams, as built
+
+- **The IRQ is ALHAR2's own**, a subroutine now (`RTI` is `RTS`; the 6502 stack check and its
+  reset are gone). The loop runs it once a **virtual IRQ: 246.09375 Hz is exactly 525/128 of the
+  tick**, so each tick adds 525 to an accumulator and each 128 is one IRQ (MOOLAH, MODSND, FRTIMR,
+  the clocks). A game frame runs when FRTIMR reaches 9, the arcade's rule. Before each virtual IRQ
+  the platform fills the three input shadows the IRQ reads, in the arcade's polarity (from MAME's
+  `tempest.cpp` and the captured switches): `ALLPOT` = the encoder counter inverted, upright;
+  `ALLPO2` = zap, fire and the starts active high; `IN1` = coins and switches active low, **bit 6
+  set: the vector generator is always halted** between frames, which `DISPLA`'s halt handshake
+  needs. The encoder moves at most 7 counts a virtual IRQ, the rest wait (the IRQ reads a 4-bit
+  difference, as the arcade's knob).
+- **Ticks** need a count, not a wait: **`SS.Tick` is proposed** (plan 6.3). The program asks at
+  start; without it, it sleeps a tick a pass and counts `1 + GFTKS` after a game frame.
+- **`RANDOM` and `RANDO2`** (20 reads in the game) call `RNDA`/`RNDB`: a 16-bit xorshift (7, 9, 8),
+  one state (`RNDST`), stepped a read, seeded from the clock. The differential tests give Atari's
+  code the same generator read for read, and compare its final state (a one-line mutation is
+  caught at frame 40). **`ZPOKST` and `ZPONTS` are neutralised** to their passing results: both
+  test for a real POKEY, which the generator is not (docs/port-tempest.md 2.4). The self-test's
+  two dispatch entries (`CSYSTM`, `CDSYST`) are no-ops now.
+- **The EAROM** is not read at start (`REHIIN` is not called): the high scores are the game's
+  defaults each run until the settings file (stage 7f). Its writes land in the shadow page, and
+  its source pointers are made logical (`EASRCE` + the data area's page).
+- **The display** (D3, D9): bitmaps 0 and 1 the lines, double-buffered, the hidden one cleared
+  first in a game frame (`SS.BmClear`, wait mode 7, 16-bit; the CPU through the service window if
+  that ever fails) and shown after (`SS.Layer`, layer 1); bitmap 2 the text on layer 0 in front;
+  layer 2 tile map 0, with tile maps off. One CLUT: `colour × 16 + intensity`, the 16 entries of
+  each colour RAM byte that changed, one `SS.ClutWrite` for the range.
+- **The text bitmap** redraws only what changed: an entry changed when it differs from last
+  frame's at the same index; changed old ones are erased (drawn in 0) and their rows marked,
+  changed new ones drawn, and unchanged ones on a marked row redrawn. The bitmap is reached a
+  block at a time through the service window, a glyph row at a time.
+- **Logical space**: module 5 blocks, data area 1, window A 1, the service window 1 (text rows now;
+  the sound page `$C4` too once D5 is built, by turns): 8. `F$MapBlk` is only ever asked for one.
+- **Controls** (D4): arrows turn at 2 counts a tick (a guess, direction unchecked), Shift fires,
+  `z` zaps, `1`/`2` start, `5` drops a coin (the left mech closed for 8 virtual IRQs), `q` quits;
+  joystick 0 the same; the mouse through `SS.MsDelta` when the driver has it (it does not yet: the
+  program asks and runs without).
+
+### Tests
+
+| Test | Result |
+|---|---|
+| `xlattest.py --src --states` (after every change here) | **2,417 game frames byte-exact**, with the generator |
+| `xlattest.py --src` (named) | **all pass** (run before two label renames, which the states run covers) |
+| `xlattest.py --src --fuzz -n 30` | **176 of 190 pass, none fail**, 14 without an in-domain case (as before) |
+| `avgtest.py`, both captures | **6,282 frames byte-exact** |
+| `make pic` | **0 reported**. It found two real faults first: `tst <SIGCODE` and `<PAUSED`, direct-page accesses to variables at `$1750` |
+| **`osrun.py`, 60 s of the scripted game** (coin, start, fire and turning; a game on the circle well, lives lost, the score climbing) | **every game frame checked, none wrong**: the text bitmap equals its list drawn from scratch, the CLUT equals colour RAM's decode, the bitmap shown holds exactly that frame's records. The pictures match `avgview`'s of MAME's frames in kind (the claw's lane in yellow, as the arcade) |
+| **The Wildbits MAME** (`wbjr2`, the Jr2 image, a targeted copy; weak evidence, no line engine) | starts, the three bitmaps and the CLUT set, the attract text screens cycle (INSERT COINS, the default HIGH SCORES, GAME OVER); **`5` then `1` gives CREDITS 1, then PLAYER 1 / RATE YOURSELF**; **`q` exits** to "Tempest over." with the text mode and the prompt back. It found one fault: the display mode passed in `R$X`'s high byte (the display was off) |
+
+Also caught while building: case-insensitive clashes (`FRAMES` and `INPUT` with `arcade.d`,
+`_DS1` between `avg.a` and `alwelg.a`, two of the platform's own) and one silent one: the game's
+table `LEVEL` against the defs' `Level` (= 2), which assembled without error, as an address of 2,
+until renamed (`LEVTAB`). A scan of every game operand against the defs' names finds none left.
+
+### Time (`osrun.py`: the host 6809's own cycles, the driver's side guessed: 150 µs a call, 400 a grfdrv call, `SS.BmLine` 474 µs + 27.5 µs a record)
+
+| 60 s of play | median | 95% | max |
+|---|---:|---:|---:|
+| A game frame, all of it | 34.6 ms | 41.8 | 121 (the first) |
+| clear, EXSTAT, NONSTA, DISPLA | 10.0 | 12.2 | 13.4 |
+| AvgRun with `SS.BmLine`, the flip, the CLUT | 24.4 | 28.5 | 36.5 |
+| the text bitmap | 0.2 | 1.9 | 102 (a whole screen of text changing) |
+
+**21 game frames a second, not the arcade's 27.3**, with the virtual IRQ exact (245.9 a second) so
+the sound and the clocks keep time. A frame of about 34.6 ms is just over two ticks, and a frame
+can start only at a tick, so most take three. The approved answer stands (heavy frames stretch;
+tuning after `tline S`), but in this model it is the median frame, not the heavy one, that
+stretches: **`tline S` decides it**, and 1.3 ms of driver time would bring the median frame
+under two ticks. Without `SS.Tick` the estimate gives 260 virtual IRQs a second (6% fast).
+
+### For review
+
+1. **`SS.Tick` ($C7, GetStat)**, plan 6.3: layout and the driver change (two bytes in GrfMem,
+   `AltISR`, the GetStat in vtio).
+2. **The seams above**: the generator for `RANDOM` and the two neutralised POKEY checks; the IRQ
+   as a subroutine; the EAROM not read until the settings file; the switch polarities.
+3. **The frame rate** in the model (21 a second), for after `tline S`.
+4. **Next**, by the plan: the hardware half needs the fixed core (the module can go on the K2
+   as it is, `make install DSK=`). Without hardware: D5's sound output stage (stage 4, the SIDs on
+   the service window), or `SS.MsDelta` and `SS.Tick` in the driver once approved.
 
 ## Open items
 
 1. The line-engine holes (FPGA developer).
 2. `tline` for stage 1, when the core is fixed: above all the per-record cost.
-3. **Stage 2 on the host**: the CPU budget and the layout (section "Stage 2 on the host",
-   "Decided ..., and what is left").
-4. `SS.MsDelta` storage (5 bytes of vtio statics, 242 → 247 of 256).
+3. `SS.MsDelta` storage (5 bytes of vtio statics, 242 → 247 of 256), and its driver code.
+4. **`SS.Tick`** (plan 6.3), proposed 2026-09-23: for review, then the driver change.
 5. The coprocessor divide's read-after-write timing, and its remainder, on hardware (D6 pilot,
    "Unchecked"; `DIVF` reads the remainder). Now also the multiplier's (`avg.a`, approved).
-6. Stage 2's hardware half (`avgplay`): the interpreter's records through `SS.BmLine` on the fixed
-   core, photographed against `avgview.py --port --png`.
+6. The hardware half: the module itself can now be the first picture (`make install DSK=`, the
+   K2 image) once the core is fixed, photographed against `tools/osrun.py --png` and
+   `avgview.py --port --png`; `avgplay` (captured frames) remains the narrower test.
+7. The encoder's rate and direction on the keys, stick and mouse: by feel, against MAME.

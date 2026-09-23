@@ -19,5 +19,6 @@ ModBeg	equ	*			the module's start: relocation offsets are from here
 	include	alearo.a
 	include	alvgut.a
 	include	stubs.a
+	include	hw.a
 	include	reloc.a
 VROM	includebin	vrom.bin		vector ROM (136002-138.np3), read by the CPU and the interpreter

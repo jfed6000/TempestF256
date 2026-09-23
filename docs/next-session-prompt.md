@@ -16,39 +16,44 @@ READ FIRST:
   - docs/port-guide.md (generic platform guide) and, from ~/projects/wild/joust/docs, only as needed:
     grfdrv256-api.md, bitmap-api.md, driver-performance.md.
 
-WHERE THINGS STAND (2026-09-23): STAGE 0, THE D6 WORK (src/, committed 07e63de) AND STAGE 2'S
-INTERPRETER ON THE HOST ARE DONE, all host only, committed (b7132f7, 51371d2). Two points are
-still FOR REVIEW (docs/status.md, "Stage 2 on the host"):
-  - src/avg.a (AvgRun) walks the display list into SS.BmLine records (batches of 255 through the
-    platform's AvgFlush) and a glyph text list; src/avgtab.a is generated (avgview.py --tables).
-  - Its specification is tools/avgview.py's PortAVG (integer; the float pipeline stays as stage 0's
-    reference to MAME). tools/avgtest.py runs it on the host 6809: every captured frame and 20,000
-    random lists byte-exact, coprocessor and software multiply.
-  - 16.9 ms a play frame at 8 MHz (median; 22.1 ms 95%): with the game's 7.5 ms and the driver's
-    ~4-5 ms it fits the median frame with little room. The budget is still open.
-  - Decided 2026-09-23: redundant dot records dropped (a zero vector on the last record's end, in
-    its colour); the D8 coprocessor's multiplier approved (software behind AVGSWM).
+WHERE THINGS STAND (2026-09-23): STAGE 0, THE D6 WORK, STAGE 2'S INTERPRETER ON THE HOST (its CPU
+budget and layout approved) AND NOW THE PLATFORM LAYER ARE DONE, host and MAME only. The platform
+layer is FOR REVIEW (docs/status.md, "The platform layer"):
+  - src/tempest, a 34,693-byte OS-9 module (src/makefile: make = build, budget, make pic; make
+    install DSK= is the targeted copy). src/tempest.a is still the host tests' build of the game.
+  - The IRQ is ALHAR2's own on a virtual 246.09375 Hz clock (525/128 of the tick, src/frame.a);
+    RANDOM is a generator (src/hw.a) that xlattest mirrors read for read; ZPOKST and ZPONTS are
+    neutralised; the text bitmap redraws only what changed (src/text.a).
+  - tools/osrun.py runs the module on the host 6809 with every os9 call scripted: 60 s of play,
+    every game frame checked (text bitmap, CLUT, line bitmap), 21 game frames a second at 34.6 ms
+    a frame (driver costs guessed). In the Wildbits MAME (no line engine) it starts, takes 5 and 1,
+    shows the attract and rating screens, and q exits cleanly.
+  - PROPOSED, NOT CODED: SS.Tick ($C7, GetStat, R$X = the 60 Hz tick count; plan 6.3). Without it
+    the program estimates (6% fast in the model). SS.MsDelta is approved but not in the driver.
+  - Nothing of this session is committed yet unless I said so.
 
 DECIDED: Rev 3; D3 glyph masks on a front text bitmap; D4 keyboard (arrows, Shift fire, z zapper) +
 mouse (SS.MsDelta, approved) + joystick, no spinner; D6 model B and its conventions; D8 math
 coprocessor approved, its multiplier too; hand-finished code in src/ (xlat/ generated, never
-edited); the D6 hand work's recommendations (ZATC4V, MBDV24, data area to $B9D). The rest of the plan's recommendations
-stand unless I say otherwise.
+edited); the D6 hand work's recommendations; stage 2: redundant dots dropped, the CPU budget
+(heavy frames stretch, no tuning before tline S) and the layout (AVGPG $0C00, window A) approved.
+The rest of the plan's recommendations stand unless I say otherwise.
 
 HARDWARE: the rc16 line engine DROPS PIXELS (gaps that move run to run; K2, two cores). The FPGA
 developer is on it and we ASSUME A FIX. Re-run bmtest C then L, and C then F, on each new core.
 
-THIS SESSION: first my answers to docs/status.md "Stage 2 on the host", "Decided ..., and what is
-left" (the CPU budget; the layout AVGPG $0C00 and window A's buffers). Then, unless I choose otherwise: the platform layer (the hardware seams, the IRQ as the frame loop,
-the module header, "make pic"), proposing its SS calls before any SS call code. Update
-docs/status.md as pieces land; stop and report at the end.
+THIS SESSION: first my answers to docs/status.md "The platform layer", "For review" (SS.Tick, the
+seams, the frame rate). Then, unless I choose otherwise: if SS.Tick is approved, the driver change
+(SS.Tick, and SS.MsDelta's) on wb/multiterm; else D5's sound output stage (plan stage 4: the POKEY
+image to the SIDs through the service window), proposing any SS call first. Update docs/status.md
+as pieces land; stop and report at the end.
 
 WHAT ONLY I CAN SUPPLY: hardware runs (tline once the core is fixed), new cores, and the decisions.
 
 GROUND RULES (from Joust, all still in force): Level 2 only. Position-independent code, OS-9 program
 modules, data through DP/U; a "make pic" check like Joust's tools/piccheck.py. No direct MMU access from
-programs (F$MapBlk and F$ClrBlk only). The one approved absolute I/O address is the VS1053 at
-$FF50-$FF57. Addresses come from the rc16 memory map, https://nitrobotics.github.io/Wildbits/ and, above
+programs (F$MapBlk and F$ClrBlk only). The approved absolute I/O addresses are the VS1053 at
+$FF50-$FF57 and the math coprocessor at $FEE0-$FEFF (D8; tools/piccheck.py knows both). Addresses come from the rc16 memory map, https://nitrobotics.github.io/Wildbits/ and, above
 both, the FPGA source in ~/projects/wild/joust/fpga-6809-cores-staging/, a READ-ONLY clone: never modify,
 commit or push anything inside it (it does not have the DMA fix yet). Propose new SS call layouts, and
 any change to an existing one, for my review before coding. DON'T MODIFY MAME, either copy.
@@ -76,6 +81,10 @@ TOOLING (all in the Joust tree, shared):
     -n 30 (~25 min), --src --states captures/states_play.bin captures/states_attract.bin (~3 min).
     The captures are regenerable (command in docs/status.md, "D6 hand work", 4); run the fuzz in the
     background and never "pkill -f" a pattern your own command line contains.
+  - The module: cd src; make (budget and pic). The host run: python3 tools/osrun.py --seconds 60
+    [--png DIR --every N] [--no-tick] (~2 min a simulated minute). The Wildbits MAME types and
+    snaps from a Lua -autoboot_script (it replaces -autoboot_command; keep the notifier's
+    subscription in a global or it is collected after one frame).
   - The interpreter's test: python3 tools/avgtest.py captures/avg_play.bin captures/avg_attract.bin
     (~8 min; --sw for the software multiply) and --fuzz 10000 (~5 min). avgview.py --verify, --compare,
     --port [--png DIR --frames N]. The avg_*.bin captures are regenerable (docs/status.md, stage 2).

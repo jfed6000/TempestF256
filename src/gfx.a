@@ -1,0 +1,352 @@
+********************************************************************
+* gfx.a - the display: three bitmaps, the CLUT, the flip, and the line
+*   records into the line engine.
+*
+*   Bitmaps 0 and 1 are the lines, double-buffered (docs/port-plan.md
+*   D9): SHOWN on layer 1, the other cleared and drawn each game frame,
+*   then shown.  Bitmap 2 is the text (D3), on layer 0 in front, drawn
+*   by text.a only where the text changes.  Layer 2 is tile map 0, and
+*   tile maps are off in the display mode, so it shows nothing.
+*
+*   One CLUT (0) for all three: entry colour * 16 + intensity (docs/
+*   port-tempest.md 4.3).  Entry 0 is transparent, which a clear bitmap
+*   is; the background behind every layer is black.
+*   Runs with U = the data area.
+********************************************************************
+
+BMNBLK              equ       10                  blocks in a 320x240 bitmap
+
+********************************************************************
+* GfxInit - bitmaps 0-2, cleared; the CLUT; the layers; the display on.
+*   Exit: carry = error in B
+********************************************************************
+GfxInit             ldb       #0
+gi1                 pshs      b
+                    lbsr      AllocBm
+                    puls      b
+                    bcs       gix
+                    leax      BMBLKS,u
+                    sta       b,x
+                    tfr       b,a
+                    pshs      b
+                    lbsr      BmClr
+                    puls      b
+                    bcs       gix
+                    incb
+                    cmpb      #3
+                    blo       gi1
+                    clr       SHOWN,u
+                    leax      CLRSHD,u            every colour differs: all 16 go out
+                    leay      CLSENT,u
+                    ldb       #16
+gi2                 lda       ,x+
+                    coma
+                    sta       ,y+
+                    decb
+                    bne       gi2
+                    lbsr      ClutCommit
+                    bcs       gix
+                    ldx       #0                  layer 0: the text
+                    ldy       #2
+                    bsr       Layer
+                    bcs       gix
+                    ldx       #1                  layer 1: the lines
+                    ldy       #0
+                    bsr       Layer
+                    bcs       gix
+                    ldx       #2                  layer 2: tile map 0, off
+                    ldy       #4
+                    bsr       Layer
+                    bcs       gix
+                    ldx       #FX_GRF+FX_BM       console text off, bitmaps only (the MCR's low byte)
+                    ldy       #0                  320x240, 60 Hz
+                    clra                          path 0
+                    ldb       #SS.DScrn
+                    os9       I$SetStt
+gix                 rts
+
+* Layer - X = layer, Y = source (0-2 bitmap, 4-6 tile map).  Carry = error.
+Layer               clra                          path 0
+                    ldb       #SS.Layer
+                    os9       I$SetStt
+                    rts
+
+********************************************************************
+* Flip - show the bitmap just drawn: layer 1 to it.  An error leaves
+*   the picture as it was (the next frame tries again).
+********************************************************************
+Flip                lda       SHOWN,u
+                    eora      #1
+                    tfr       a,b
+                    clra
+                    tfr       d,y
+                    ldx       #1
+                    bsr       Layer
+                    bcs       flx
+                    lda       SHOWN,u
+                    eora      #1
+                    sta       SHOWN,u
+flx                 rts
+
+********************************************************************
+* GfxExit - the display mode as it was, then the bitmaps allocated here
+*   freed (SS.FScrn).
+********************************************************************
+GfxExit             lda       BMOWN,u
+                    ldb       #0
+ge1                 lsra
+                    bcc       ge2
+                    pshs      a,b
+                    clra
+                    tfr       d,y
+                    ldb       #SS.FScrn           A = 0 = path 0
+                    os9       I$SetStt
+                    puls      a,b
+ge2                 incb
+                    cmpb      #3
+                    blo       ge1
+                    clr       BMOWN,u
+                    clra
+                    ldb       MCRLO,u
+                    tfr       d,x
+                    ldb       MCRHI,u
+                    tfr       d,y
+                    clra
+                    ldb       #SS.DScrn
+                    os9       I$SetStt
+                    rts
+
+********************************************************************
+* AllocBm - B = bitmap #: SS.AScrn 320x240 (one that exists already is
+*   used as it is and left allocated on exit), then SS.BmBlk.
+* Exit: A = the bitmap's first block; carry = error in B
+********************************************************************
+AllocBm             pshs      b                   ,s = bitmap #
+                    clra
+                    tfr       d,y
+                    ldx       #0                  320x240
+                    ldb       #SS.AScrn           A = 0 = path 0
+                    os9       I$SetStt
+                    bcc       ab1
+                    cmpb      #E$WADef
+                    beq       ab2
+aberr               leas      1,s
+                    orcc      #Carry
+                    rts
+ab1                 lda       #1                  ours: free it on exit
+                    ldb       ,s
+                    beq       ab0
+ab3                 lsla
+                    decb
+                    bne       ab3
+ab0                 ora       BMOWN,u
+                    sta       BMOWN,u
+ab2                 clra
+                    ldb       ,s
+                    tfr       d,y
+                    ldb       #SS.BmBlk
+                    os9       I$GetStt            X = first block
+                    bcs       aberr
+                    tfr       x,d
+                    tfr       b,a
+                    tsta
+                    bne       abok
+                    ldb       #E$WUndef
+                    bra       aberr
+abok                leas      1,s
+                    andcc     #^Carry
+                    rts
+
+********************************************************************
+* BmClr - A = bitmap # (0-2): clear it to 0, transparent.  SS.BmClear
+*   on the DMA engine, one call that returns with the bitmap clear (wait
+*   mode 7, 16-bit; it needs the fixed core, docs/port-tempest.md
+*   4.2); if that ever fails, NODMA latches and the CPU clears through
+*   the service window from then on, as Joust does.
+*   Exit: carry = error in B.  U kept.
+********************************************************************
+BmClr               tst       NODMA,u
+                    bne       BmClrCPU
+                    pshs      a,u
+                    tfr       a,b
+                    clra
+                    tfr       d,y                 R$Y low = bitmap #, high = arming line 0
+                    ldu       #0                  all rows
+                    ldx       #(DmaWt.Poll<<DmaWt.Shift+1)*256 poll until done, 16-bit; colour 0
+                    clra                          path 0
+                    ldb       #SS.BmClear
+                    os9       I$SetStt
+                    puls      a,u
+                    bcc       bcok
+                    inc       NODMA,u
+BmClrCPU            leax      BMBLKS,u
+                    lda       a,x                 the first block
+                    ldb       #BMNBLK
+bc1                 pshs      a,b
+                    leax      SWIN,u
+                    lbsr      Map1                D = the block's logical address
+                    bcs       bcerr
+                    tfr       d,x
+                    ldy       #$2000/2
+                    clra
+                    clrb
+bc2                 std       ,x++
+                    leay      -1,y
+                    bne       bc2
+                    puls      a,b
+                    inca
+                    decb
+                    bne       bc1
+bcok                clrb
+                    rts
+bcerr               leas      2,s
+                    rts
+
+********************************************************************
+* AvgFlush - the interpreter's batch (avg.a): X = the records, B = the
+*   count (1-255), U = the data area, DP its page; may clobber all but
+*   S.  SS.BmLine into the hidden bitmap until every record is drawn:
+*   the driver returns short when the line engine's FIFO lacks room.
+*   A call that draws none 20 times running, or an error (our terminal
+*   hidden), gives the batch up: a frame loses lines, nothing hangs.
+********************************************************************
+AvgFlush            lda       #20
+                    sta       FLSHN,u
+af1                 pshs      b,x                 ,s = records left, 1,s = the next
+                    lda       SHOWN,u
+                    eora      #1
+                    tfr       a,b
+                    clra
+                    tfr       d,y                 Y = the hidden bitmap
+                    ldb       ,s
+                    pshs      u
+                    tfr       d,u                 U = the count
+                    clra                          path 0
+                    ldb       #SS.BmLine
+                    os9       I$SetStt            U = drawn
+                    tfr       u,d
+                    puls      u
+                    bcs       afx
+                    tstb
+                    beq       af3                 none: the FIFO is full
+                    pshs      b
+                    ldb       1,s
+                    subb      ,s
+                    stb       1,s                 left
+                    ldb       ,s+
+                    lda       #8
+                    mul
+                    addd      1,s
+                    std       1,s                 past the ones drawn
+                    lda       #20
+                    sta       FLSHN,u
+                    bra       af4
+af3                 dec       FLSHN,u
+                    beq       afx
+af4                 puls      b,x
+                    tstb
+                    bne       af1
+                    rts
+afx                 puls      b,x,pc
+
+********************************************************************
+* ClutCommit - the colours that changed in colour RAM (CLRSHD, which
+*   the game writes as the arcade's COLPORT) into the CLUT: 16 entries
+*   a colour, one per intensity, from the first changed colour to the
+*   last in one SS.ClutWrite.  The decode is MAME's (avg_tempest_device
+*   handler_7), as tools/avgview.py clut_rgb: colour RAM inverted, bit 3
+*   green, bit 2 blue, bits 1-0 red ($F3 and $0C); scaled by the
+*   intensity / 15.
+*   Exit: carry = error in B.  CLSENT keeps what was sent.
+********************************************************************
+ClutCommit          leax      CLRSHD,u
+                    leay      CLSENT,u
+                    clrb
+cc1                 lda       b,x
+                    cmpa      b,y
+                    bne       cc2
+                    incb
+                    cmpb      #16
+                    blo       cc1
+                    clrb                          nothing changed
+                    rts
+cc2                 pshs      b                   1,s = the first
+                    ldb       #15
+cc3                 lda       b,x
+                    cmpa      b,y
+                    bne       cc4
+                    decb
+                    bra       cc3
+cc4                 pshs      b                   ,s = the last
+                    ldb       1,s
+                    leay      CLUTBF,u
+cc5                 leax      CLRSHD,u
+                    lda       b,x
+                    leax      CLSENT,u
+                    sta       b,x                 sent from now on
+                    bsr       Colour16
+                    cmpb      ,s
+                    beq       cc6
+                    incb
+                    bra       cc5
+cc6                 puls      a,b                 A = the last, B = the first
+                    pshs      b
+                    suba      ,s                  the colours less one
+                    inca
+                    ldb       #16
+                    mul                           D = the entries
+                    pshs      u
+                    tfr       d,u                 R$U = count
+                    ldb       2,s                 the first colour
+                    lda       #16
+                    mul
+                    tfr       d,y                 R$Y = CLUT 0, the first entry
+                    ldx       ,s                  the data area
+                    leax      CLUTBF,x
+                    clra                          path 0
+                    ldb       #SS.ClutWrite
+                    os9       I$SetStt
+                    puls      u
+                    leas      1,s
+                    rts
+
+* Colour16 - A = a colour RAM byte: its 16 entries (intensity 0-15), B, G, R, A, at Y (advanced).
+*   B, X kept.
+Colour16            pshs      b,x
+                    leax      ClutLv,pcr
+                    coma                          the bits are active low
+                    pshs      a                   ,s = the colour, active high
+                    clrb
+c16a                pshs      b                   ,s = the intensity, 1,s the colour
+                    lda       1,s                 blue: bit 2, level 0 or $F3
+                    anda      #$04
+                    lsla                          $08: row 2 ($F3) when set
+                    bsr       c16lv
+                    lda       1,s                 green: bit 3
+                    anda      #$08
+                    bsr       c16lv
+                    lda       1,s                 red: bits 1-0, rows 0-3 ($00, $0C, $F3, $FF)
+                    anda      #$03
+                    lsla
+                    lsla
+                    bsr       c16lv
+                    clr       ,y+                 alpha
+                    puls      b
+                    incb
+                    cmpb      #16
+                    blo       c16a
+                    leas      1,s
+                    puls      b,x,pc
+* c16lv - A = a level row * 4; ,s+2 = the intensity (past the return): the level at Y+.  X kept.
+c16lv               lsla
+                    lsla                          row * 16
+                    adda      2,s                 + intensity
+                    lda       a,x
+                    sta       ,y+
+                    rts
+
+* ClutLv - level * intensity / 15 (truncated), rows for $00, $0C, $F3, $FF
+ClutLv              fcb       0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+                    fcb       0,0,1,2,3,4,4,5,6,7,8,8,9,10,11,12
+                    fcb       0,16,32,48,64,81,97,113,129,145,162,178,194,210,226,243
+                    fcb       0,17,34,51,68,85,102,119,136,153,170,187,204,221,238,255

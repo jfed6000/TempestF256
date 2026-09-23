@@ -53,6 +53,12 @@ SndOut                 register image -> sound chip(s)
 CLUT commit            SS.ClutWrite if colour RAM changed
 ```
 
+*As built (`src/frame.a`, 2026-09-23): the ticks since the last pass come from `SS.Tick`
+(proposed, 6.3), and the loop sleeps only when none has passed; 246.09375 Hz is exactly 525/128 of
+the tick; the virtual IRQ is ALHAR2's own, fed through the input shadows; the clear comes first in
+a game frame, and the CLUT and the text bitmap follow the flip. `docs/status.md`, "The platform
+layer".*
+
 Game frames take 2 or 3 ticks (36.6 ms target); a frame whose work overruns simply takes longer, as on
 the arcade. The clear sits right after the tick so it arms inside the blanking window — **if**
 measurement confirms the fill still waits for that window (port-tempest 4.2). The order of clear, draw
@@ -386,6 +392,38 @@ much.
 **Considered and not proposed:** a polyline record (move-to/line-to). It shrinks the caller's buffer
 but not the driver's work — every line is still seven register writes and a poll — and the slope in
 stage 1 is what would justify it.
+
+### 6.3 `$C7 SS.Tick` — the 60 Hz tick count (new; GetStat) — PROPOSED 2026-09-23, for review
+
+**Why.** The frame loop (section 2) runs the arcade's 246 Hz IRQ virtually, 525/128 of them a
+tick, so it must know **how many ticks have passed**, not only that one has: a game frame with its
+drawing takes about two ticks, and ticks that pass while it works are otherwise lost. A user
+process cannot see one. `F$Time` counts seconds, `D.Tick` is in the system's direct page, and
+`F$Sleep` only waits. Measured on the host (`tools/osrun.py`, docs/status.md "The platform
+layer"): with a tick count the virtual IRQ runs at **245.9 a second** (the arcade's 246.1); without
+one, estimating from the frames that ran (`GFTKS`), at **260** (6% fast, and it depends on the
+frame's length). Sound tempo, the game's clocks and the attract timing all ride on it.
+
+| Register | Exit |
+|---|---|
+| **R$X** | the count of 60 Hz clock ticks since the driver started, 16 bits, wrapping |
+
+No entry registers besides the path and code. Any terminal may read it; it has no side effects
+and does not depend on the terminal being live. A caller takes differences, so the wrap and the
+starting value do not matter.
+
+**Driver changes:** two bytes, **`gr.Ticks`**, in the GrfMem globals (`wildbits_vtio.d`, after
+`gr.SigFgCode`; that page has room, and vtio's device statics, at 242 of 256 with 5 more wanted by
+`SS.MsDelta`, do not need to give any). `AltISR` (vtio, entered from the clock every 1/60 s)
+increments it first thing: about 10 cycles a tick. The GetStat is answered in **vtio** alone,
+without a call into grfdrv, since it needs no hardware: an `ldd >gr.Ticks / std R$X,u` and a
+clean return. `$C7` is free (after `SS.LiveKeys` `$C6`).
+
+**Considered and not proposed:** `F$CpyMem` of the kernel's `D.Sec`/`D.Tick` (reaches into system
+memory by address, per call); VICKY's raster row at `$FFDA` (a third absolute-address exception,
+and it cannot count the frames that wrap); the timers at `$FE30` (shared hardware, and the same
+exception). **Until the call exists** the program runs on the estimate: it asks once at start,
+and on an error sleeps a tick a pass and counts `1 + GFTKS` after a game frame.
 
 ## 7. What only you can supply
 

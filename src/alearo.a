@@ -95,6 +95,7 @@ _ALEARO_49
 	lda	0,x			ALEARO:171 LDA X,TEASRL
 	sta	<EASRCE+1			ALEARO:172 STA EASRCE
 	lda	1,x			ALEARO:173 LDA X,TEASRH
+	adda	<RXP			a RAM address: + the data area's page (a logical pointer)
 	sta	<EASRCE			ALEARO:174 STA EASRCE+1
 _ALEARO_65
 *					ALEARO:175 ENDIF

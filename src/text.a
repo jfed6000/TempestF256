@@ -1,0 +1,338 @@
+********************************************************************
+* text.a - the text bitmap (docs/port-plan.md D3): the interpreter's
+*   text list (window A + $1800, AV.TCNT entries of 6 bytes: glyph, $80
+*   = big; CLUT index; column; row, both 16-bit signed, the beam
+*   rounded) drawn as glyph masks (glyphs.a) into bitmap 2, which is
+*   single-buffered and in front of the lines.
+*
+*   Only what changed is redrawn.  TXOLD holds the list as last drawn.
+*   Entry i has changed when it differs from TXOLD's entry i, or one of
+*   the lists has no entry i.  The changed old entries are erased (their
+*   masks drawn in 0) and the rows they touched marked; then the changed
+*   new entries are drawn, and so is every unchanged entry on a marked
+*   row, since an erase may have taken a pixel it shared.  A list that
+*   has not changed costs a compare of each entry.
+*
+*   The bitmap is reached a block at a time through the service window
+*   (Map1, SWIN); a pixel's place is row * 320 + column, block and
+*   offset in the 10 blocks from TXBLK.  Pixels off the bitmap are not
+*   drawn.  Runs with U = the data area.
+********************************************************************
+
+TXLIST              equ       $1800               in window A (avg.a)
+GL.X                equ       0                   glyphs.a: a mask's record, 15 bytes a glyph and size
+GL.Y                equ       1
+GL.W                equ       2
+GL.H                equ       3
+GL.ROWS             equ       4                   up to 11 rows, a byte each, the leftmost pixel bit 7
+GL.LEN              equ       15
+
+********************************************************************
+* TxCommit - draw the changes since the last frame's text
+********************************************************************
+TxCommit            clr       TXERS,u             nothing erased yet (ROWMSK is cleared at the first)
+* pass 1: erase what changed
+                    clr       TXCLR,u             erasing
+                    ldx       VWIN,u
+                    leax      TXLIST,x            X = the new list
+                    leay      TXOLD,u             Y = the old
+                    ldd       #0
+tc1                 cmpd      TXCNT,u             every old entry
+                    bhs       tc3
+                    pshs      d
+                    cmpd      AVGPG+AV.TCNT,u
+                    bhs       tc2                 no new entry i: erase
+                    lbsr      TxSame
+                    beq       tc2a
+tc2                 tst       TXERS,u
+                    bne       tc2b
+                    inc       TXERS,u             the first erase: no rows marked yet
+                    pshs      x
+                    leax      ROWMSK,u
+                    ldb       #30
+tc0                 clr       ,x+
+                    decb
+                    bne       tc0
+                    puls      x
+tc2b                pshs      x
+                    tfr       y,x
+                    lbsr      TxDraw              the old entry in 0
+                    puls      x
+tc2a                leax      6,x
+                    leay      6,y
+                    puls      d
+                    addd      #1
+                    bra       tc1
+* nothing erased and as many entries: the list is the same, nothing to do
+tc3                 tst       TXERS,u
+                    bne       tc3a
+                    ldd       TXCNT,u
+                    cmpd      AVGPG+AV.TCNT,u
+                    beq       tcx
+* pass 2: draw what changed, and what an erase may have touched
+tc3a                ldx       VWIN,u
+                    leax      TXLIST,x
+                    leay      TXOLD,u
+                    ldd       #0
+tc4                 cmpd      AVGPG+AV.TCNT,u     every new entry
+                    bhs       tc7
+                    pshs      d
+                    cmpd      TXCNT,u
+                    bhs       tc5                 no old entry i: draw
+                    lbsr      TxSame
+                    bne       tc5
+                    tst       TXERS,u             unchanged: nothing erased, nothing to redraw
+                    beq       tc6
+                    lbsr      TxMarked            on a marked row?
+                    beq       tc6
+tc5                 lda       1,x                 its colour
+                    sta       TXCLR,u
+                    lbsr      TxDraw
+tc6                 leax      6,x
+                    leay      6,y
+                    puls      d
+                    addd      #1
+                    bra       tc4
+* the new list is now the old
+tc7                 ldd       AVGPG+AV.TCNT,u
+                    std       TXCNT,u
+                    beq       tcx
+                    lda       #6
+                    mul                           D = bytes (256 entries at most: B's count x 6
+                    tfr       d,y                 fits, and a count of 256 has B = 0...)
+                    ldd       AVGPG+AV.TCNT,u
+                    cmpd      #256
+                    blo       tc8
+                    ldy       #256*6
+tc8                 ldx       VWIN,u
+                    leax      TXLIST,x
+                    pshs      u
+                    leau      TXOLD,u
+tc9                 lda       ,x+
+                    sta       ,u+
+                    leay      -1,y
+                    bne       tc9
+                    puls      u
+tcx                 rts
+
+* TxSame - Z = 1 when the entries at X and Y are the same.  X, Y kept; D clobbered.
+TxSame              ldd       ,x
+                    cmpd      ,y
+                    bne       tsx
+                    ldd       2,x
+                    cmpd      2,y
+                    bne       tsx
+                    ldd       4,x
+                    cmpd      4,y
+tsx                 rts
+
+********************************************************************
+* TxGlyph - X = an entry: Y = its glyph's mask record.  X kept.
+********************************************************************
+TxGlyph             ldb       ,x
+                    andb      #$7F
+                    lda       #GL.LEN*2
+                    mul
+                    leay      GlyTab,pcr
+                    leay      d,y
+                    tst       ,x
+                    bpl       tgx
+                    leay      GL.LEN,y            the big one follows the normal
+tgx                 rts
+
+********************************************************************
+* TxMarked - X = an entry: Z = 0 when a row it covers is marked.  X, Y kept.
+********************************************************************
+TxMarked            pshs      x,y
+                    bsr       TxGlyph
+                    ldb       GL.H,y
+                    beq       tmn                 a blank
+                    lda       GL.Y,y              the first row: row + y (signed)
+                    pshs      b                   ,s = rows left
+                    ldb       GL.Y,y
+                    sex
+                    addd      4,x
+tm1                 cmpd      #239                on the bitmap?
+                    bhi       tm2                 (negative is above 239 unsigned)
+                    pshs      d
+                    lbsr      RowBit              X = the mask byte, A = the bit
+                    anda      ,x
+                    puls      d
+                    bne       tmy
+tm2                 addd      #1
+                    dec       ,s
+                    bne       tm1
+                    leas      1,s
+tmn                 orcc      #Zero
+                    puls      x,y,pc
+tmy                 leas      1,s
+                    andcc     #^Zero
+                    puls      x,y,pc
+
+* RowBit - D = a row (0-239): X = its byte in ROWMSK, A = its bit.  U kept.
+RowBit              pshs      b
+                    lsrb
+                    lsrb
+                    lsrb
+                    leax      ROWMSK,u
+                    abx
+                    ldb       ,s+
+                    andb      #7
+                    lda       #1
+rb1                 tstb
+                    beq       rbx
+                    lsla
+                    decb
+                    bra       rb1
+rbx                 rts
+
+********************************************************************
+* TxDraw - X = an entry: its mask in TXCLR (0 erases, and marks the
+*   rows it touches).  X, Y, U kept.
+********************************************************************
+TxDraw              pshs      x,y
+                    bsr       TxGlyph             Y = the mask record
+                    ldb       GL.H,y
+                    beq       tdx                 a blank
+                    ldb       GL.X,y              the first column: column + x
+                    sex
+                    addd      2,x
+                    std       TXCOL,u
+                    ldb       GL.Y,y              the first row: row + y
+                    sex
+                    addd      4,x
+                    std       TXROW,u
+                    leay      GL.ROWS,y
+                    sty       TXGLY,u             the next row's bits
+                    lda       -GL.ROWS+GL.H,y
+                    pshs      a                   ,s = rows left
+                    lda       -GL.ROWS+GL.W,y
+                    pshs      a                   ,s = the width, 1,s rows left
+td1                 ldd       TXROW,u
+                    cmpd      #239
+                    bhi       td4                 off the bitmap
+                    tst       TXCLR,u
+                    bne       td2
+                    lbsr      RowBit              erasing: mark the row
+                    ora       ,x
+                    sta       ,x
+td2                 lbsr      TxLine               this row's pixels
+td4                 ldx       TXGLY,u
+                    leax      1,x
+                    stx       TXGLY,u
+                    ldd       TXROW,u
+                    addd      #1
+                    std       TXROW,u
+                    dec       1,s
+                    bne       td1
+                    leas      2,s
+tdx                 puls      x,y,pc
+
+* TxLine - one row of the mask: the bits at TXGLY, width ,s+2 (past
+*   the return), from column TXCOL on row TXROW (on the bitmap), in
+*   TXCLR.  The columns off the bitmap are dropped first; the rest are
+*   at most 8 pixels in a row of memory, which crosses a block boundary
+*   at most once.  X, Y kept.
+TxLine               pshs      x,y
+                    ldb       6,s                 the width
+                    lda       [TXGLY,u]           the bits, the leftmost in bit 7
+                    pshs      a,b                 ,s = bits, 1,s = pixels
+                    ldd       TXCOL,u
+                    bpl       tl2
+tl1                 lsl       ,s                  left of column 0: drop them
+                    addd      #1
+                    dec       1,s
+                    beq       tlx
+                    tsta
+                    bmi       tl1
+tl2                 cmpd      #319                right of column 319: nothing more
+                    bhi       tlx
+                    pshs      d                   ,s = the first column, 2,s bits, 3,s pixels
+                    addb      3,s                 the last column + 1: past 320?
+                    adca      #0
+                    subd      #320
+                    bls       tl3
+                    negb                          drop the ones past it
+                    addb      3,s
+                    stb       3,s
+tl3                 lbsr      TxOff               X = the offset in the block, A = the block
+                    leas      2,s
+                    pshs      x                   ,s = the offset, 2,s bits, 3,s pixels
+                    adda      TXBLK,u
+                    pshs      a                   ,s = the block, 1,s the offset
+                    leax      SWIN,u
+                    lbsr      Map1                D = its logical address
+                    bcs       tl9
+                    tfr       d,y                 Y = the block's end
+                    leay      $2000,y
+                    addd      1,s
+                    tfr       d,x                 X = the first pixel
+                    lda       TXCLR,u
+tl5                 lsl       3,s
+                    bcc       tl6
+                    sta       ,x
+tl6                 leax      1,x
+                    dec       4,s
+                    beq       tl9
+                    pshs      y                   at the block's end?
+                    cmpx      ,s++
+                    blo       tl5
+                    pshs      a                   the next block
+                    lda       1,s
+                    inca
+                    sta       1,s
+                    leax      SWIN,u
+                    lbsr      Map1
+                    tfr       d,x
+                    tfr       d,y
+                    leay      $2000,y
+                    puls      a
+                    bcc       tl5
+tl9                 leas      3,s
+tlx                 leas      2,s
+                    puls      x,y,pc
+
+* TxOff - TXROW (0-239), ,s+2 = a column (0-319): X = the pixel's offset
+*   in its block, A = the block (0-9) in the bitmap
+TxOff               ldb       TXROW+1,u           the row
+                    lda       #5
+                    mul                           D = row * 5
+                    clr       ,-s                 ,s = bits 23-16 of row * 320
+                    lslb
+                    rola
+                    rol       ,s
+                    lslb
+                    rola
+                    rol       ,s
+                    lslb
+                    rola
+                    rol       ,s
+                    lslb
+                    rola
+                    rol       ,s
+                    lslb
+                    rola
+                    rol       ,s
+                    lslb
+                    rola
+                    rol       ,s                  ,s:D = row * 320
+                    addd      3,s                 + the column
+                    bcc       to1
+                    inc       ,s
+to1                 pshs      a                   ,s = bits 15-8, 1,s = bits 23-16
+                    anda      #$1F
+                    tfr       d,x                 X = the offset in the block
+                    lda       ,s+                 bits 15-8
+                    lsra
+                    lsra
+                    lsra
+                    lsra
+                    lsra
+                    pshs      a
+                    lda       1,s
+                    lsla
+                    lsla
+                    lsla
+                    ora       ,s+                 the block: bits 23-13
+                    leas      1,s
+                    rts

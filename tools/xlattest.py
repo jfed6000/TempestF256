@@ -400,6 +400,16 @@ class XRig(d6pilot.Rig):
         # equal, or equal once mapped back (recorded states)
         self.soft = sorted(soft)
         self.hw = {}                        # arcade hardware address -> value its shadow holds
+        # RANDOM and RANDO2: the port's generator (hw.a), read for read on both CPUs
+        self.frozen = []
+        if al is not None and "RNDST" in self.labels:
+            for name in ("ZPOKST", "ZPONTS"):       # neutralised: they read a frozen POKEY
+                if name in al.labels:
+                    self.frozen.append((al.labels[name], al.labels[name] + 40))
+            if not getattr(self.ref, "rnd_hooked", False):
+                self.ref.rnd_hooked = True
+                for a_ in (0x60CA, 0x60DA):
+                    self.ref.io.insert(0, (a_, a_, lambda a: XRig.rnd_rig.rnd_read(), None))
         self.relsnap = {}
         for c in self.cpus:
             c.mapper = Mapper(c.cfg, len(code), self.labels, al, code, self.ref.mem) if al else None
@@ -413,9 +423,26 @@ class XRig(d6pilot.Rig):
                                        % (a, a - c.cfg["code"], c.pc - c.cfg["code"]))
             c.map_io(lo, hi, None, guard)
 
+    rnd_rig = None
+
+    def rnd_read(self):
+        pc = self.ref.opc
+        if any(lo <= pc < hi for lo, hi in self.frozen):
+            return 0
+        self.rnd = rnd_step(self.rnd)
+        return self.rnd & 0xFF
+
     def case(self, *args, **kw):
-        return super().case(*args, skip_regs=self.addr_regs, accept=self.accept if self.soft else None,
-                            **kw)
+        XRig.rnd_rig = self
+        self.seed = self.rnd = random.randrange(1, 0x10000)
+        self.rnd_end = {}
+        r = super().case(*args, skip_regs=self.addr_regs, accept=self.accept if self.soft else None,
+                         **kw)
+        if "RNDST" in self.labels and not r[2]:
+            for c in self.cpus:
+                if self.rnd_end.get(id(c), self.rnd) != self.rnd:
+                    return r[0], None, ["RANDOM: the two generators end in different states"], c.cfg
+        return r
 
     def accept(self, c, i, want):
         d = c.cfg["data"]
@@ -472,6 +499,9 @@ class XRig(d6pilot.Rig):
         c.static.clear()
         c.mem[d:d + 0x800] = arcade
         c.mem[d + 0x800:d + 0xA00] = bytes(0x200)
+        if "RNDST" in self.labels:
+            r_ = d + self.labels["RNDST"]
+            c.mem[r_], c.mem[r_ + 1] = self.seed >> 8, self.seed & 0xFF
         if rel is not None:
             lo = self.labels["RELTAB"]
             c.mem[d + lo:d + lo + len(rel)] = rel
@@ -499,6 +529,9 @@ class XRig(d6pilot.Rig):
         c.u, c.dp, c.s = d, d >> 8, d6pilot.STACK
         c.cc = 0x50
         cyc = c.call(cfg["code"] + self.labels[entry], limit=2_000_000)
+        if "RNDST" in self.labels:
+            r_ = d + self.labels["RNDST"]
+            self.rnd_end[id(c)] = c.mem[r_] << 8 | c.mem[r_ + 1]
         out = bytearray(c.mem[d:d + 0x800])
         # a pointer left as it was given compares as the arcade value it came from
         for p in self.ptrs:
@@ -516,6 +549,14 @@ class XRig(d6pilot.Rig):
 
 
 SYMS = {}
+
+
+def rnd_step(x):
+    """hw.a's RANDOM generator: xorshift16 (7, 9, 8)."""
+    x ^= (x << 7) & 0xFFFF
+    x ^= x >> 9
+    x ^= (x << 8) & 0xFFFF
+    return x
 
 
 def reloc_split(al, labels):

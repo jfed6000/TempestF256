@@ -1,0 +1,192 @@
+********************************************************************
+* frame.a - the frame loop: the arcade's IRQ and MAINLN on the 60 Hz
+*   tick (docs/port-plan.md section 2, decision D7).
+*
+*   The arcade's IRQ is 12.096 MHz / 4096 / 12 = 246.09375 Hz, exactly
+*   525/128 of the 60 Hz tick.  Each tick adds 525 to VACC and runs one
+*   virtual IRQ (VirIRQ: the input shadows, then ALHAR2's IRQ, which
+*   runs MOOLAH, MODSND and FRTIMR) for each 128 it holds.  A game frame
+*   runs when FRTIMR reaches 9, the arcade's MAINLN rule: 2 or 3 ticks,
+*   27.3 a second, longer when the work overruns, as on the arcade.
+*
+*   Ticks come from SS.Tick (proposed, docs/port-plan.md 6.3): the
+*   ticks since the last pass, so a pass that ran long (a game frame
+*   with its drawing is about two ticks) still owes the virtual IRQs of
+*   the ticks it covered, and the loop sleeps only when no tick has
+*   passed.  Without the call (a driver that does not have it) every
+*   pass sleeps to the next tick and counts 1, and GFTKS more after a
+*   game frame: an estimate, so sound and the game's clocks run a little
+*   slow or fast.
+********************************************************************
+
+SS.Tick             equ       $C7                 GetStat: R$X = the 60 Hz tick count (PROPOSED)
+MAXTKS              equ       8                   at most this many ticks owed at once
+GFTKS               equ       2                   without SS.Tick: the ticks a game frame is taken to cost (osrun.py)
+VIRQN               equ       525                 virtual IRQs a tick, times VIRQD
+VIRQD               equ       128
+
+MainLoop            tst       SIGCODE,u
+                    lbne      Done
+                    tst       PAUSED,u
+                    lbne      PausWt
+                    bsr       Ticks               B = the ticks since the last pass
+                    tstb
+                    bne       ml0                 time has passed (a game frame ran long): go on
+                    ldx       #2                  wait for the next tick (X = 1 only gives up the time slice)
+                    os9       F$Sleep
+                    bra       MainLoop
+ml0                 pshs      b
+                    lbsr      InFram              the keys, the stick, the mouse (input.a)
+                    puls      b
+                    tst       QUITKEY,u
+                    lbne      Done
+ml1                 tstb                          the virtual IRQs the ticks owe
+                    beq       ml3
+                    pshs      b
+                    ldd       VACC,u
+                    addd      #VIRQN
+                    std       VACC,u
+ml2                 ldd       VACC,u
+                    subd      #VIRQD
+                    blo       ml2x
+                    std       VACC,u
+                    lbsr      VirIRQ
+                    bra       ml2
+ml2x                puls      b
+                    decb
+                    bra       ml1
+ml3                 lda       <FRTIMR             the arcade's MAINLN: a game frame once 9 have run
+                    cmpa      #9
+                    blo       MainLoop
+                    lbsr      GamFrm
+                    bra       MainLoop
+
+********************************************************************
+* Ticks - B = the ticks since the last pass, 0 to MAXTKS
+* TickRst - start counting afresh (start-up, and after a pause)
+********************************************************************
+Ticks               tst       TICKOK,u
+                    beq       tk2
+                    lda       #0                  path 0
+                    ldb       #SS.Tick
+                    os9       I$GetStt            X = the count
+                    bcs       tk2
+                    tfr       x,d
+                    pshs      d
+                    subd      LASTTK,u
+                    puls      x
+                    stx       LASTTK,u
+                    cmpd      #MAXTKS
+                    bls       tk1
+                    ldb       #MAXTKS             a stall (or the count wrapped oddly): no flood
+tk1                 rts
+tk2                 clr       TICKOK,u            no SS.Tick: sleep a tick, then count it as 1,
+                    ldx       #2                  and GFTKS more after a game frame
+                    os9       F$Sleep
+                    ldb       #1
+                    tst       TICKGF,u
+                    beq       tk3
+                    clr       TICKGF,u
+                    addb      #GFTKS
+tk3                 rts
+
+TickRst             clr       TICKOK,u
+                    clr       TICKGF,u
+                    lda       #0
+                    ldb       #SS.Tick
+                    os9       I$GetStt
+                    bcs       trx
+                    stx       LASTTK,u
+                    inc       TICKOK,u
+trx                 rts
+
+********************************************************************
+* VirIRQ - one virtual IRQ: the switches into the shadows the IRQ reads
+*   (the arcade's levels and polarities, from MAME's tempest.cpp and the
+*   captures), then the IRQ itself (alhar2.a).
+*     HW_60C8 ALLPOT: low 4 bits the encoder counter, inverted; bit 4 0
+*             = upright; bit 5 0 (option switch MOPTI4 off)
+*     HW_60D8 ALLPO2: bit 3 superzapper, 4 fire, 5 start 1, 6 start 2,
+*             1 = pressed; bits 0-2 the special options (0)
+*     HW_0C00 IN1: active low: coins (bit 2 the left, the coin key),
+*             slam, test, diagnostic step all open; bit 6 1 = the vector
+*             generator is halted, which the port's always is between
+*             frames (AvgRun is synchronous)
+*   The encoder moves at most 7 counts a virtual IRQ (the IRQ reads a
+*   4-bit difference); the rest waits in KNBPND for the next.
+********************************************************************
+VirIRQ              ldd       KNBPND,u
+                    bmi       vi1
+                    cmpd      #7
+                    bls       vi2
+                    ldd       #7
+                    bra       vi2
+vi1                 cmpd      #-7
+                    bge       vi2
+                    ldd       #-7
+vi2                 pshs      b
+                    addb      KNOB,u
+                    stb       KNOB,u
+                    comb
+                    andb      #$0F
+                    stb       HW_60C8,u
+                    ldb       ,s+
+                    sex
+                    pshs      d
+                    ldd       KNBPND,u
+                    subd      ,s++
+                    std       KNBPND,u
+                    lda       BUTTNS,u
+                    sta       HW_60D8,u
+                    lda       #$7F                IN1 at rest
+                    tst       COINTM,u
+                    beq       vi3
+                    dec       COINTM,u
+                    anda      #^$04               the left coin mech closed
+vi3                 sta       HW_0C00,u
+                    lbra      IRQ
+
+********************************************************************
+* GamFrm - one game frame: MAINLN's three calls, then the picture.
+*   The hidden line bitmap is cleared first, while the tick that woke
+*   us is recent (docs/port-plan.md D9: double buffer, synchronous
+*   clear); the list is interpreted into it; it is shown; then the
+*   colours and the text, which are single-buffered, follow.
+********************************************************************
+GamFrm              clr       <FRTIMR             ALEXEC:53 LDA I,0 / STA FRTIMR
+                    inc       TICKGF,u
+                    lda       SHOWN,u
+                    eora      #1
+                    lbsr      BmClr               the hidden line bitmap
+                    lbsr      EXSTAT              ALEXEC:55-57
+                    lbsr      NONSTA
+                    lbsr      DISPLA
+                    lbsr      AvgRun              the list into SS.BmLine records (AvgFlush)
+                    lbsr      Flip
+                    lbsr      ClutCommit
+                    lbsr      TxCommit
+                    ldd       GFRAMS,u
+                    addd      #1
+                    std       GFRAMS,u
+                    rts
+
+********************************************************************
+* GamInit - the arcade's RESET (ALTES2:238-296) less its self-test,
+*   then MAINLN's start (ALEXEC:45-47).  RAM and vector RAM are clear
+*   already.  The EAROM is not read (REHIIN): the high scores are the
+*   game's defaults until the settings file (plan stage 7f).
+********************************************************************
+GamInit             lda       #$7F                the switches at rest (VirIRQ)
+                    sta       HW_0C00,u
+                    lda       #$0F
+                    sta       HW_60C8,u
+                    clr       HW_60D8,u
+                    clr       HW_0D00,u           the option switches: MAME's defaults (the
+                    clr       HW_0E00,u           settings file sets them, stage 7f)
+                    lda       #$10                ALTES2:290 LDA I,MVINVY / STA TOUT0
+                    sta       <TOUT0
+                    lbsr      INIINI              ALTES2:293
+                    lbsr      INIDSP              ALTES2:294
+                    lbsr      INISOU              ALEXEC:45
+                    clr       <QSTATE             ALEXEC:46-47 CNEWGA
+                    lbra      TickRst

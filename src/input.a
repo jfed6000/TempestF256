@@ -1,0 +1,202 @@
+********************************************************************
+* input.a - the controls (docs/port-plan.md D4) into what the arcade's
+*   IRQ reads: encoder counts (KNBPND, handed to the virtual IRQs by
+*   VirIRQ) and the ALLPO2 buttons (BUTTNS), plus the coin and Q.
+*
+*   Keyboard (SS.LiveKeys): left and right arrows turn at KEYRATE a
+*   tick, Shift fires, z is the superzapper (lower case: the driver's
+*   codes are unshifted), 1 and 2 are the start buttons, 5 drops a coin,
+*   q quits.  Joystick 0 (SS.Joy JOY.Sticks): left and right at the same
+*   rate, button 0 fires, button 1 zaps.  Mouse (SS.MsDelta $D0, when
+*   the driver has it): X motion, one count a count; left button fires,
+*   right zaps.  All of them together.
+*
+*   The rate and the direction are first guesses, for tuning by feel
+*   against MAME (the settings file, stage 7f).
+********************************************************************
+
+SS.MsDelta          equ       $D0                 approved (plan 6.1); not in the driver yet
+KEYRATE             equ       2                   encoder counts a tick while a key or the stick is held
+KNBMAX              equ       64                  counts owed at most, either way
+COINLEN             equ       8                   virtual IRQs the coin switch stays closed (32 ms)
+KY.Shift            equ       %00000001           SS.LiveKeys sense bits (D.KySns)
+KY.Left             equ       %00100000
+KY.Right            equ       %01000000
+BT.Zap              equ       $08                 ALLPO2, active high
+BT.Fire             equ       $10
+BT.Start1           equ       $20
+BT.Start2           equ       $40
+
+********************************************************************
+* InFram - B = the ticks since the last pass.  U = the data area.
+********************************************************************
+InFram              pshs      b                   ,s = ticks
+                    clr       BUTTNS,u
+                    clra                          path 0
+                    ldb       #SS.LiveKeys
+                    os9       I$GetStt            A = sense bits, X, Y, U = the six held keys
+                    pshs      u,y,x,a,cc          ,s cc, 1,s sense, 2,s the six keys
+                    tfr       dp,a                U back: the data area is DP's page
+                    clrb
+                    tfr       d,u
+                    puls      cc
+                    bcs       inkx                an older grfdrv256: no keyboard
+                    lda       ,s                  the sense bits
+                    bita      #KY.Left
+                    beq       in1
+                    ldb       7,s
+                    lbsr      KnbDn
+in1                 bita      #KY.Right
+                    beq       in2
+                    ldb       7,s
+                    lbsr      KnbUp
+in2                 bita      #KY.Shift
+                    beq       in3
+                    ldb       #BT.Fire
+                    lbsr      BtnOn
+in3                 leay      1,s                 the held keys
+                    ldb       #6
+in4                 lda       ,y+
+                    beq       in6
+                    pshs      b
+                    ldb       #BT.Zap
+                    cmpa      #'z
+                    beq       in5
+                    ldb       #BT.Start1
+                    cmpa      #'1
+                    beq       in5
+                    ldb       #BT.Start2
+                    cmpa      #'2
+                    beq       in5
+                    lbsr      KbNew               5 and q act on a new press
+                    bra       in5x
+in5                 lbsr      BtnOn
+in5x                puls      b
+in6                 decb
+                    bne       in4
+                    ldd       1,s                 remember this pass's keys
+                    std       KBLAST,u
+                    ldd       3,s
+                    std       KBLAST+2,u
+                    ldd       5,s
+                    std       KBLAST+4,u
+inkx                leas      7,s
+* the stick
+                    lda       #0                  path 0
+                    ldb       #SS.Joy
+                    ldx       #JOY.Sticks         both sticks as bits; stick 0 is ours
+                    os9       I$GetStt
+                    bcs       injx                an older grfdrv256: no sticks
+                    tfr       x,d
+                    tfr       b,a
+                    bita      #JY.Left
+                    beq       ij1
+                    ldb       ,s
+                    bsr       KnbDn
+ij1                 bita      #JY.Right
+                    beq       ij2
+                    ldb       ,s
+                    bsr       KnbUp
+ij2                 bita      #JY.Btn0
+                    beq       ij3
+                    ldb       #BT.Fire
+                    bsr       BtnOn
+ij3                 bita      #JY.Btn1
+                    beq       injx
+                    ldb       #BT.Zap
+                    bsr       BtnOn
+injx
+* the mouse
+                    tst       MOUSE,u
+                    beq       inx
+                    lda       #0
+                    ldb       #SS.MsDelta
+                    os9       I$GetStt            X = delta X, A = buttons
+                    bcs       inx
+                    bita      #%00000001
+                    beq       im1
+                    ldb       #BT.Fire
+                    bsr       BtnOn
+im1                 bita      #%00000010
+                    beq       im2
+                    ldb       #BT.Zap
+                    bsr       BtnOn
+im2                 tfr       x,d
+                    addd      KNBPND,u
+                    bsr       KnbSet
+inx                 puls      b,pc
+
+* BtnOn - B = an ALLPO2 bit: pressed.  A kept.
+BtnOn               orb       BUTTNS,u
+                    stb       BUTTNS,u
+                    rts
+
+* KnbUp / KnbDn - B = ticks: KEYRATE counts a tick one way or the other.  A kept.
+KnbUp               pshs      a
+                    lda       #KEYRATE
+                    mul
+                    addd      KNBPND,u
+                    bra       kn1
+KnbDn               pshs      a
+                    lda       #KEYRATE
+                    mul
+                    pshs      d
+                    ldd       KNBPND,u
+                    subd      ,s++
+kn1                 bsr       KnbSet
+                    puls      a,pc
+
+* KnbSet - KNBPND = D, held to +-KNBMAX.  A, B clobbered.
+KnbSet              cmpd      #KNBMAX
+                    ble       ks1
+                    ldd       #KNBMAX
+ks1                 cmpd      #-KNBMAX
+                    bge       ks2
+                    ldd       #-KNBMAX
+ks2                 std       KNBPND,u
+                    rts
+
+* KbNew - A = a held key: 5 or q, when it was not held last pass, act on it.  B, Y kept.
+KbNew               leax      KBLAST,u
+                    pshs      b
+                    ldb       #6
+kw1                 cmpa      ,x+                 held last pass too?
+                    beq       kwx
+                    decb
+                    bne       kw1
+                    cmpa      #'5
+                    bne       kw2
+                    lda       #COINLEN            a coin, closed for COINLEN virtual IRQs
+                    sta       COINTM,u
+                    bra       kwx
+kw2                 cmpa      #'q
+                    bne       kwx
+                    inc       QUITKEY,u
+kwx                 puls      b,pc
+
+********************************************************************
+* InInit / InExit - the mouse into counts mode for the run, and back to
+*   the pointer.  A driver without SS.MsDelta refuses: no mouse.
+********************************************************************
+InInit              clr       MOUSE,u
+                    lda       #0
+                    ldb       #SS.MsDelta
+                    ldx       #1                  counts mode
+                    os9       I$SetStt
+                    bcs       iix
+                    inc       MOUSE,u
+                    lda       #0                  the motion so far is not ours
+                    ldb       #SS.MsDelta
+                    os9       I$GetStt
+iix                 clrb
+                    rts
+
+InExit              tst       MOUSE,u
+                    beq       iex
+                    clr       MOUSE,u
+                    lda       #0
+                    ldb       #SS.MsDelta
+                    ldx       #0                  pointer mode
+                    os9       I$SetStt
+iex                 clrb
+                    rts

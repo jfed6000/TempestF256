@@ -247,6 +247,7 @@ class CPU6502:
 
     def step(self):
         pc0 = self.pc
+        self.opc = pc0                  # the instruction being executed, for I/O hooks
         op = self.mem[pc0]
         if op not in OPS:
             raise Halt("undocumented opcode %02X at %04X" % (op, pc0))

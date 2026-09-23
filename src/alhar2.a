@@ -1,6 +1,9 @@
 * alhar2.a - ALHAR2.MAC translated by tools/m65to09.py (model B), hand-finished here (src/).
 * Each line ends with the 6502 source line it comes from.
-* HAND-FILE: the IRQ: rewritten into the frame loop
+* The IRQ, called by the platform's frame loop once a virtual 246 Hz IRQ (frame.a), after it has
+* filled the input shadows: HW_0C00 (IN1), HW_60C8 (ALLPOT), HW_60D8 (ALLPO2).  The 6502's stack
+* and frame-overrun check and its reset (ALHAR2:45-52) are gone: the loop runs a game frame whenever
+* FRTIMR reaches 9, so it cannot overrun, and there is no reset to go to.  RTI is RTS.
 CHKSMA
 	fcb	$7C		ALHAR2:33 CHKSMA:: .BYTE QCHKSA
 IRQ
@@ -10,18 +13,7 @@ IRQ
 	lda	<RY			ALHAR2:42 TYA
 	pshs	a			ALHAR2:43 PHA
 *					ALHAR2:44 CLD   ;SET HEX
-* HAND: TSX (the 6502 stack pointer)
-*				ALHAR2:45 TSX
-	ldb	<RX			ALHAR2:46 CPX I,0D0
-	cmpb	#$D0
-	bcs	_ALHAR2_12			ALHAR2:47 IFCS   ;STACK TOO DEEP? ;brALHAR2:47:855
-	lda	<FRTIMR			ALHAR2:48 LDA FRTIMR
-	bpl	SOFTOK			ALHAR2:49 BPL SOFTOK  ;OVERRUN TIME LIMIT (BR IF OK) ;brALHAR2:49:856
-_ALHAR2_12
-*					ALHAR2:50 ENDIF   ;FALL INTO RESET ROUTINE
-* HAND: BRK
-	swi			ALHAR2:51 BRK
-	lbra	RESET			ALHAR2:52 JMP RESET
+*					ALHAR2:45-52: the stack and overrun check, dropped (above)
 SOFTOK
 * HAND: hardware register (ALHAR2:56 SOFTOK: STA WTCHDG  ;KICK DOG)
 	sta	HW_5000,u			ALHAR2:56 SOFTOK: STA WTCHDG  ;KICK DOG
@@ -178,8 +170,7 @@ _ALHAR2_117
 	puls	a			ALHAR2:178 PLA
 	sta	<RX			ALHAR2:179 TAX
 	puls	a			ALHAR2:180 PLA
-* HAND: RTI (the IRQ)
-	rti			ALHAR2:181 RTI
+	rts			ALHAR2:181 RTI (a subroutine here)
 LITSON
 	fcb	$FF,$FD,$FE,$FC		ALHAR2:183 LITSON: .BYTE 0FF,^CMLED1,^CMLED2,^C<MLED1!MLED2>
 

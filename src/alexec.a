@@ -64,8 +64,8 @@ ROUTAD
 	fdb	INIRAT-ROUTAD
 	fdb	NEWLF2-ROUTAD
 	fdb	PLDROP-ROUTAD
-* HAND: dispatch entry $D7E1 is not a label
-	fdb	LITSON+4-ROUTAD
+* CSYSTM, ALTES2's self-test ($D7E1): the port drops the self-test, so a no-op
+	fdb	NOOPR_ALEXEC-ROUTAD
 	fdb	PRBOOM-ROUTAD
 	fcb	$0B,$00,$3F,$00,$0A,$00,$AE,$00		the 6502 words' low bytes: A after the dispatch
 	fcb	$F0,$00,$FF,$00,$00,$00,$8B,$00

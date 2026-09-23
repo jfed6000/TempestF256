@@ -1,0 +1,73 @@
+********************************************************************
+* data.a - the data area (8K, one block).  U = its base and DP = its
+* page for the whole run (OS-9 gives both at start; page-aligned).
+*
+*   $0000-$07FF  the arcade's 2K of RAM, page for page (arcade.d)
+*   $0800-$08FF  the port's game variables: POKIMG, VWIN, CLRSHD, RNDST
+*   $0900-$09FF  HWSHAD, the hardware shadows (port.d; the EAROM's
+*                indexed writes land up to HWSHAD+$29, still inside)
+*   $0A00-$0B9D  RELTAB, reloc.a's tables
+*   $0C00-$0CFF  AVGPG, the AVG interpreter's page (avg.a)
+*   $0D00-       the platform's, below
+*   top          the stack, and OS-9's parameter copy above it
+********************************************************************
+
+DatBeg              rmb       $0D00               the game's and the interpreter's (port.d, arcade.d)
+TXOLD               rmb       256*6               the text list last drawn (text.a TxCommit)
+CLUTBF              rmb       256*4               SS.ClutWrite entries, B,G,R,A (gfx.a ClutCommit)
+
+* windows: W.Blk the block mapped (0 = none), W.Log its logical address
+W.Blk               equ       0
+W.Log               equ       1
+W.Len               equ       3
+AWIN                rmb       W.Len               window A: vector RAM, the record batch, the text list
+SWIN                rmb       W.Len               the service window (text bitmap rows; Map1)
+AWBLK               rmb       1                   window A's RAM block (F$AllRAM), 0 = none
+
+* the display
+BMOWN               rmb       1                   bit n: bitmap n allocated here (freed on exit)
+SHOWN               rmb       1                   the line bitmap on layer 1 (0 or 1)
+BMBLKS              rmb       3                   bitmaps 0-2: their first blocks (SS.BmBlk)
+TXBLK               equ       BMBLKS+2            the text bitmap's
+NODMA               rmb       1                   non-zero: SS.BmClear failed once; the CPU clears
+MCRLO               rmb       1                   the display mode on entry, restored on exit
+MCRHI               rmb       1
+CLSENT              rmb       16                  colour RAM as last sent to the CLUT (ClutCommit)
+TXCNT               rmb       2                   TXOLD's entries
+ROWMSK              rmb       30                  text.a: the rows an erase touched, a bit a row
+TXCLR               rmb       1                   text.a: the colour being drawn (0 = erasing)
+TXERS               rmb       1                   text.a: non-zero once this frame erased (ROWMSK valid)
+TXROW               rmb       2                   text.a: scratch
+TXCOL               rmb       2
+TXGLY               rmb       2
+FLSHN               rmb       1                   AvgFlush: tries left while the FIFO is full
+
+* the frame loop
+LASTTK              rmb       2                   SS.Tick's count at the last pass
+TICKOK              rmb       1                   non-zero: SS.Tick answers
+TICKGF              rmb       1                   a game frame ran since the last Ticks (the fallback)
+VACC                rmb       2                   the virtual IRQ's Bresenham accumulator (frame.a)
+GFRAMS              rmb       2                   game frames run
+PAUSED              rmb       1                   non-zero = our terminal is a shadow (SS.WSig S$WinBg)
+SIGCODE             rmb       1                   abort/interrupt signal received (0 = none)
+
+* input (input.a)
+KNOB                rmb       1                   the emulated encoder counter (low 4 bits)
+KNBPND              rmb       2                   counts not yet given to a virtual IRQ (signed)
+BUTTNS              rmb       1                   ALLPO2's active-high buttons (zap, fire, starts)
+COINTM              rmb       1                   virtual IRQs the coin switch stays closed
+MOUSE               rmb       1                   non-zero: SS.MsDelta answers (counts mode set)
+KBLAST              rmb       6                   last pass's held keys (new-press detection)
+QUITKEY             rmb       1                   Q was pressed
+EXITST              rmb       1                   exit status, for the sign-off
+OPTSAV              rmb       32                  path 0's options as found (Cleanup puts them back)
+OPTNEW              rmb       32                  the same, with echo and the signal characters off
+OPTOK               rmb       1                   OPTSAV holds a real packet
+TIMBUF              rmb       6                   F$Time's packet (the RANDOM seed)
+
+StkBase             equ       $1800               the stack: the top 2K, with OS-9's parameters
+                    ifgt      .-StkBase
+                    error     data area overflow
+                    endc
+                    rmb       $2000-.
+size                equ       .

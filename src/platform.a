@@ -1,0 +1,283 @@
+********************************************************************
+* platform.a - start-up, the windows, pause, and the exit (Joust's
+*   src/platform.a, the parts that carry over).  Runs with U = the data
+*   area and DP = its page, as the game does.
+********************************************************************
+
+********************************************************************
+* start - U = the data area, DP = its page (OS-9)
+********************************************************************
+start               tfr       u,x                 clear the data area below the stack
+                    ldy       #StkBase
+st1                 clr       ,x+
+                    leay      -1,y
+                    bne       st1
+                    tfr       u,d                 the pseudo-registers' pointers: the data
+                    sta       <RXP                area's page, the low byte the 6502 register
+                    sta       <RYP
+                    leax      Icpt,pcr            abort and interrupt end the program cleanly
+                    os9       F$Icpt
+                    lbsr      SeedRnd             RANDOM's generator, from the clock
+* the display mode, for the exit
+                    lda       #FX_TXT             fallback if the mode cannot be read
+                    sta       MCRLO,u
+                    lda       #FX_OMIT
+                    sta       MCRHI,u
+                    clra                          path 0
+                    ldb       #SS.DScrn
+                    os9       I$GetStt
+                    lbcs      Quit
+                    tfr       x,d
+                    stb       MCRLO,u
+                    tfr       y,d
+                    stb       MCRHI,u
+                    lbsr      OptSet              no echo, no CTRL+C/BREAK/ESC: Q quits
+                    lbsr      WSigSet             ask to be told when we are hidden
+                    lbsr      AWinInit            window A: vector RAM, records, texts
+                    lbcs      Quit
+                    lbsr      RELINI              the address tables (reloc.a), after VWIN
+                    lbsr      GfxInit             bitmaps, CLUT, layers, display
+                    lbcs      Quit
+                    lbsr      InInit              the mouse, if SS.MsDelta answers
+                    lbsr      GamInit             the arcade's reset, less its self-test
+                    lbra      MainLoop            frame.a
+
+Done                clrb
+Quit                stb       EXITST,u            ExitMsg picks the sign-off from this
+                    pshs      b                   exit status
+                    lbsr      Cleanup
+                    puls      b
+                    os9       F$Exit
+
+********************************************************************
+* SeedRnd - RNDST (hw.a) from the time of day; never 0
+********************************************************************
+SeedRnd             leax      TIMBUF,u
+                    os9       F$Time
+                    ldd       TIMBUF+3,u          hour, minute
+                    eora      TIMBUF+5,u          second
+                    eorb      TIMBUF+2,u          day
+                    orb       #1
+                    std       RNDST,u
+                    rts
+
+********************************************************************
+* AWinInit - window A: one RAM block (F$AllRAM), mapped for the whole
+*   run, cleared (the arcade's RESET zeroes vector RAM).  VWIN = its
+*   logical address.  Exit: carry = error in B
+********************************************************************
+AWinInit            ldb       #1
+                    os9       F$AllRAM            D = the block
+                    bcs       awx
+                    stb       AWBLK,u
+                    pshs      u
+                    tfr       d,x
+                    ldb       #1
+                    os9       F$MapBlk            U = its logical address
+                    tfr       u,x
+                    puls      u
+                    bcs       awx
+                    stx       AWIN+W.Log,u
+                    lda       AWBLK,u
+                    sta       AWIN+W.Blk,u
+                    stx       VWIN,u
+                    ldy       #$2000/2
+                    clra
+                    clrb
+aw1                 std       ,x++
+                    leay      -1,y
+                    bne       aw1
+awx                 rts
+
+********************************************************************
+* Map1 - make the 1-block window of record X hold block A (Joust's).
+* Entry: X = window record (W.Blk, W.Log), A = block (not 0)
+* Exit:  D = logical address of the block; carry = F$MapBlk error in B.
+*        X, Y, U kept.
+********************************************************************
+Map1                cmpa      W.Blk,x
+                    bne       m1a
+                    ldd       W.Log,x
+                    andcc     #^Carry
+                    rts
+m1a                 pshs      a,y,u
+                    bsr       Unmap1
+                    pshs      x
+                    tfr       a,b
+                    clra
+                    tfr       d,x                 X = the block
+                    ldb       #1
+                    os9       F$MapBlk            U = logical address
+                    puls      x
+                    bcs       m1e
+                    stu       W.Log,x
+                    lda       ,s
+                    sta       W.Blk,x
+                    puls      a,y,u
+                    ldd       W.Log,x
+                    andcc     #^Carry
+                    rts
+m1e                 puls      a,y,u,pc
+
+* Unmap1 - release the 1-block window of record X, if mapped.  X, D, Y, U kept.
+Unmap1              tst       W.Blk,x
+                    beq       u1x
+                    pshs      d,u
+                    ldu       W.Log,x
+                    ldb       #1
+                    os9       F$ClrBlk
+                    clr       W.Blk,x
+                    puls      d,u
+u1x                 rts
+
+********************************************************************
+* Cleanup - every exit path: the mouse, the signals, the display, the
+*   windows, the sign-off, the terminal's options
+********************************************************************
+Cleanup             lbsr      InExit              the mouse back to pointer mode
+                    lbsr      WSigClr             stop the driver signalling a dead process
+                    lbsr      GfxExit
+                    leax      SWIN,u
+                    bsr       Unmap1
+                    leax      AWIN,u
+                    bsr       Unmap1
+                    ldb       AWBLK,u
+                    beq       cu1
+                    clra
+                    tfr       d,x
+                    ldb       #1
+                    os9       F$DelRAM
+                    clr       AWBLK,u
+cu1                 lbsr      ExitMsg             clear the screen and sign off
+                    lbra      OptRestore          echo and the signal characters back on
+
+********************************************************************
+* PausWt - our terminal is a shadow (SS.WSig told us so).  Nothing runs:
+*   the game stands still, as a paused game should.  The sleep is cut
+*   short by S$WinFg; the half second only bounds the race where that
+*   signal lands between the test and the F$Sleep.
+*
+*   Coming forward, grfdrv256 restores this terminal's CLUTs and
+*   bitmaps itself; CLSENT is complemented so the next frame sends every
+*   colour again anyway, and the tick count is taken afresh so the time
+*   away is not owed as virtual IRQs.
+********************************************************************
+PausWt              ldx       #30
+                    os9       F$Sleep
+                    tst       SIGCODE,u
+                    lbne      Done
+                    tst       PAUSED,u
+                    bne       PausWt
+                    leax      CLRSHD,u
+                    leay      CLSENT,u
+                    ldb       #16
+pr1                 lda       ,x+
+                    coma
+                    sta       ,y+
+                    decb
+                    bne       pr1
+                    lbsr      TickRst
+                    lbra      MainLoop
+
+********************************************************************
+* WSigSet / WSigClr - register and release the terminal visibility
+*   signals (SS.WSig $E1).  A driver without the call returns an error,
+*   which is ignored: the game then never pauses.  WSigSet must follow
+*   F$Icpt - an unintercepted signal kills us.
+********************************************************************
+WSigSet             clra                          path 0
+                    ldb       #SS.WSig
+                    ldx       #S$WinBg*256+S$WinFg
+                    os9       I$SetStt
+                    clrb
+                    rts
+
+WSigClr             clra                          path 0
+                    ldb       #SS.WSig
+                    ldx       #0                  both codes 0 = deregister
+                    os9       I$SetStt
+                    clrb
+                    rts
+
+********************************************************************
+* Icpt - signal intercept (U = the data area, as given to F$Icpt; DP is
+*   not relied on).  Keyboard abort and interrupt end the program; the
+*   window signals pause and resume it; the rest are ignored.
+********************************************************************
+Icpt                cmpb      #S$WinBg            our terminal was hidden?
+                    bne       ic1
+                    stb       PAUSED,u
+                    rti
+ic1                 cmpb      #S$WinFg            or shown again?
+                    bne       ic2
+                    clr       PAUSED,u
+                    rti
+ic2                 cmpb      #S$Abort
+                    blo       icx
+                    cmpb      #S$Intrpt
+                    bhi       icx
+                    stb       SIGCODE,u
+icx                 rti
+
+********************************************************************
+* OptSet / OptRestore - path 0 without echo, and without any character
+*   that can signal, pause or end a read, for the run; then back exactly
+*   as found (Joust's: the four characters are $FF, which no key makes).
+*   Alt+Left and Alt+Right still switch terminals.
+********************************************************************
+OptSet              clr       OPTOK,u
+                    leax      OPTSAV,u
+                    clra                          path 0
+                    ldb       #SS.Opt
+                    os9       I$GetStt
+                    bcs       osx                 leave the terminal alone
+                    leax      OPTSAV,u
+                    leay      OPTNEW,u
+                    ldb       #32
+opcpy               lda       ,x+
+                    sta       ,y+
+                    decb
+                    bne       opcpy
+                    leay      OPTNEW,u
+                    clr       PD.EKO-PD.OPT,y     no echo
+                    clr       PD.PAU-PD.OPT,y     no end-of-page pause
+                    lda       #$FF                a code no key produces
+                    sta       PD.INT-PD.OPT,y     CTRL+C
+                    sta       PD.QUT-PD.OPT,y     BREAK
+                    sta       PD.PSC-PD.OPT,y     CTRL+W
+                    sta       PD.EOF-PD.OPT,y     ESC
+                    tfr       y,x
+                    clra
+                    ldb       #SS.Opt
+                    os9       I$SetStt
+                    bcs       osx
+                    inc       OPTOK,u
+osx                 rts
+
+OptRestore          tst       OPTOK,u
+                    beq       orx                 never changed them
+                    clr       OPTOK,u
+                    leax      OPTSAV,u
+                    clra                          path 0
+                    ldb       #SS.Opt
+                    os9       I$SetStt
+orx                 rts
+
+********************************************************************
+* ExitMsg - clear the text screen and sign off (after GfxExit has put
+*   the text mode back).  An error exit clears the screen only and lets
+*   the shell report the error.
+********************************************************************
+ByeMsg              fcb       $0C                 clear the screen and home
+                    fcc       /Tempest over./
+                    fcb       $0D
+ByeLen              equ       *-ByeMsg
+
+ExitMsg             leax      ByeMsg,pcr
+                    ldy       #ByeLen
+                    tst       EXITST,u
+                    beq       em1
+                    ldy       #1                  an error: just clear the screen
+em1                 lda       #1                  stdout
+                    os9       I$Write
+                    rts

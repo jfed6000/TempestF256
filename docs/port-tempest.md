@@ -143,9 +143,11 @@ Tempest checks itself, and punishes a failed check. Found by name (`ZAT*`, `ZQ*`
   instead of `$29`, so the check failed on genuine boards.
 - `ZPONTS` (`ALSCO2.MAC:876`) reads both POKEYs' `RANDOM` twice and expects the nibbles to match —
   **a check for real POKEY hardware** — into `QT5`, acted on by `ZQPONS` (`ALDIS2.MAC:2968`).
-- `ZPOKST` (`ALSOUN.MAC:352`, inside `INISOU`) stops the POKEYs and checks that `RANDOM` keeps changing,
-  into `QT4`, acted on by `ZQPOKS` (`ALDIS2.MAC:961`). A software LFSR stepped per read would pass it;
-  `ZPONTS`'s nibble test it would not.
+- `ZPOKST` (`ALSOUN.MAC:352`, inside `INISOU`) stops the POKEYs and checks that `RANDOM` then holds
+  still (a value that changes is stored into `QT4`), acted on by `ZQPOKS` (`ALDIS2.MAC:961`). A
+  generator stepped per read fails both.
+- **Both neutralised (2026-09-23)** to their passing results, `src/alsoun.a` and `src/alsco2.a`,
+  when `RANDOM` became the port's generator (`src/hw.a`; docs/status.md, "The platform layer").
 - `ZATC4V` (`ALSCO2.MAC:105`), the `ZATC3`/`ZATC4` ranges, and the `ZATLIS` sum (`ALSCO2.MAC:983`)
   verify the copyright message and the calls to it. **`ZATC4V` XORs 6502 code** (`ZATC4S`, the call
   to the ATARI message) into `QT2`, acted on by `ZQAT4C` (`ALEXEC.MAC:262`, a `SED`): on the port

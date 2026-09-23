@@ -1069,40 +1069,15 @@ ZATC3E
 	lbra	LDROUT			ALSCO2:865 JMP LDROUT  ;DISPLAY LADDER
 LDRDSP
 	lbsr	INFO			ALSCO2:870 JSR INFO  ;DISPLAY SCORE & LIVES INFO
+* ZPONTS (ALSCO2:877-900), anti-tamper, NEUTRALISED (docs/port-tempest.md 2.4): it checks that
+* RANDOM behaves like a real POKEY's when read twice in a row.  Its passing result: QT5 = 0, and
+* TEMP0, Y and A all 0, as they come out when the POKEYs read alike (the test harness's frozen
+* reads give exactly this).
 ZPONTS
-* HAND: SEI (interrupt mask)
-	orcc	#$10			ALSCO2:877 SEI
-* HAND: hardware register (ALSCO2:878 LDA RANDOM)
-	lda	HW_60CA,u			ALSCO2:878 LDA RANDOM
-* HAND: hardware register (ALSCO2:879 LDY RANDOM)
-	ldb	HW_60CA,u			ALSCO2:879 LDY RANDOM
-	stb	<RY
-	ldb	<RY			ALSCO2:880 STY TEMP0
-	stb	<TEMP0
-	lsra			ALSCO2:881 LSR
-	lsra			ALSCO2:882 LSR
-	lsra			ALSCO2:883 LSR
-	lsra			ALSCO2:884 LSR
-	eora	<TEMP0			ALSCO2:885 EOR TEMP0
-	sta	<TEMP0			ALSCO2:886 STA TEMP0
-* HAND: hardware register (ALSCO2:887 LDA RANDO2)
-	lda	HW_60DA,u			ALSCO2:887 LDA RANDO2
-* HAND: hardware register (ALSCO2:888 LDY RANDO2)
-	ldb	HW_60DA,u			ALSCO2:888 LDY RANDO2
-	stb	<RY
-* HAND: CLI (interrupt mask)
-	andcc	#$EF			ALSCO2:889 CLI
-	eora	<TEMP0			ALSCO2:890 EOR TEMP0
-	anda	#$F0			ALSCO2:891 AND I,0F0
-	eora	<TEMP0			ALSCO2:892 EOR TEMP0
-	sta	<TEMP0			ALSCO2:893 STA TEMP0
-	lda	<RY			ALSCO2:894 TYA
-	asla			ALSCO2:895 ASL
-	asla			ALSCO2:896 ASL
-	asla			ALSCO2:897 ASL
-	asla			ALSCO2:898 ASL
-	eora	<TEMP0			ALSCO2:899 EOR TEMP0
-	sta	QT5,u			ALSCO2:900 STA QT5   ;NO. KILL STACK
+	clra				ALSCO2:877-900, neutralised
+	sta	<TEMP0
+	sta	<RY
+	sta	QT5,u
 	lbsr	RNKDSP			ALSCO2:901 JSR RNKDSP  ;DISPLAY RANKS
 	lda	#$FF			ALSCO2:902 LDA I,-1  ;NO GLOW
 LDROUT
@@ -1423,7 +1398,7 @@ _ALSCO2_944
 	lbsr	VGVTR1			ALSCO2:1144 JSR VGVTR1  ;-GET INTO POSITION
 	ldb	<INDEX4			ALSCO2:1145 LDX INDEX4
 	stb	<RX
-	leax	LEVEL,pcr			ROM table + X
+	leax	LEVTAB,pcr			ROM table + X
 	ldb	<RX
 	abx
 	ldb	0,x			ALSCO2:1146 LDY X,LEVEL
@@ -1466,7 +1441,7 @@ _ALSCO2_944
 	lbsr	VGVTR1			ALSCO2:1170 JSR VGVTR1  ;POSITION BEAM
 	ldb	<INDEX4			ALSCO2:1171 LDX INDEX4  ;DISPLAY HOLE
 	stb	<RX
-	leax	LEVEL,pcr			ROM table + X
+	leax	LEVTAB,pcr			ROM table + X
 	ldb	<RX
 	abx
 	lda	0,x			ALSCO2:1172 LDA X,LEVEL

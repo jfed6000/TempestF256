@@ -6,6 +6,7 @@ RY	equ	$BB
 POKIMG	equ	$0800		POKEY register image (AUDF1 at +0, AUDF2 at +8)
 VWIN	equ	$0810		window A's logical address, for absolute vector RAM
 CLRSHD	equ	$0820		colour RAM's shadow, committed by SS.ClutWrite
+RNDST	equ	$0830		2: RANDOM's generator state (hw.a), never 0
 HWSHAD	equ	$0900		shadows of the other hardware registers (HAND)
 HW_0C00	equ	HWSHAD+0
 HW_0D00	equ	HWSHAD+1

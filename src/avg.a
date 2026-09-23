@@ -275,7 +275,7 @@ _DV	ldx	<AV.RPTR
 	ldd	<AV.ROW
 	std	<AV.LR
 	cmpd	#BMH-1
-	bhi	_DS1
+	bhi	_DSV1
 	stb	4,x
 	lbsr	AvMove			(X kept)
 	ldd	<AV.COL			the end
@@ -301,7 +301,7 @@ _D1	lda	<AV.CLUT		the last record sent (LEX, LEY set before)
 	lbra	AvLoop
 _DS	ldd	<AV.ROW
 	std	<AV.LR
-_DS1	lbsr	AvMove
+_DSV1	lbsr	AvMove
 _DC	lbsr	AvClip			carry set: nothing left
 	lbcs	AvLoop
 	ldx	<AV.RPTR
