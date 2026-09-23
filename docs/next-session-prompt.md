@@ -8,39 +8,38 @@ Wildbits F256 (6809, rc16 FPGA core, K2 and Jr2). Joust, the first game on this 
 ~/projects/wild/joust. This folder is a local git repo (branch main, no remote until I say so).
 
 READ FIRST:
-  - docs/port-plan.md: the plan. Section 5 is the decisions, section 6 the proposed SS call layouts.
-  - docs/port-tempest.md: the survey of tempest_orig/src it rests on, file by file, with line numbers.
-  - docs/port-guide.md: the generic platform guide (stale in three places; port-tempest.md's head says
-    which).
+  - docs/status.md: state, decisions, hardware findings, stage 0's numbers. Start here.
+  - docs/port-plan.md: the plan (section 5 decisions, section 6 SS call proposals).
+  - docs/port-tempest.md: the survey of tempest_orig/src, file by file, with line numbers.
   - ~/.claude/projects/-home-magnus-projects-wild-joust/memory/MEMORY.md and the files it points at:
     Joust's platform rules, which apply here unchanged.
-  - From ~/projects/wild/joust/docs, only as needed: grfdrv256-api.md, bitmap-api.md (its section 15
-    still says SS.BmLine runs with interrupts masked; it does not), driver-performance.md.
+  - docs/port-guide.md (generic platform guide) and, from ~/projects/wild/joust/docs, only as needed:
+    grfdrv256-api.md, bitmap-api.md, driver-performance.md.
 
-WHERE THINGS STAND (2026-09-22): the survey and the plan are written and committed. Nothing is built.
-The findings that shape everything: the game advances once per 9 IRQs of 246.1 Hz (27.3 Hz, not 60);
-the display is AVG display lists, which a 6809 interpreter will turn into SS.BmLine records; the Math
-Box use is ONE divide, floor(dz*128/dy), exactly; the spinner is signed counts per game frame, 72 a
-turn, clamped to +-31; sound is one table interpreter writing 8 POKEY channels; zero page is full;
-tempest_orig contains anti-tamper checks that must be made to pass (port-tempest 2.4). Stock MAME 0.276
-(/usr/games/mame) verifies the tempest set from tempest_orig/notebooks/roms, and runs Lua scripts.
+WHERE THINGS STAND (2026-09-22): STAGE 0 IS COMPLETE (host only, all committed). The tools:
+tools/avgcap.lua (stock MAME + Lua: display-list capture, a scripted player, 6502 frame timing, POKEY
+log), tools/avgview.py (literal port of MAME's Tempest AVG, 320x240 renderer, matches MAME's own
+snapshots), tools/glyphs.py (the D3 font from the vector ROM), tools/m65parse.py (the MAC65 reader).
+Captures go to captures/ (gitignored; regenerate with the tools). Key numbers: a played frame needs
+148 line records median, 305 max, once characters are glyphs; pixels <= ~3.6K; the 6502 works 21.4 ms
+of each 36.6 ms game frame (27.1 Hz), 99% 41 ms; indexed addressing is ~15% of live instructions.
 
-THIS SESSION: I will open with my answers to the plan's decisions (D2-D10) and to the section 6
-layouts. Take the plan's recommendation for any decision I do not answer, and say that you did. Then,
-in order:
-  1. Record the decisions in docs/port-plan.md section 5, and start docs/status.md (state, decisions,
-     findings, open items) in the Joust shape.
-  2. Stage 0: tools/m65parse.py, tools/avgcap.lua (stock MAME, unmodified, via -autoboot_script),
-     tools/avgview.py. Render captured frames to PNG and put them beside MAME's own screenshots. Write
-     the lines and pixels per frame, over attract mode and play, into docs/status.md. Check the screen
-     mapping of port-tempest 4.4 against the renders.
-  3. The D6 pilot: WORSCR, MODSND and one list builder, under both register models; size and cycles.
-  Steps 2 and 3 are host work and need nothing from me. No game code beyond the pilot until I have
-  seen its numbers. Do not code the section 6 calls until I approve them.
+DECIDED: Rev 3; D3 glyph masks on a front text bitmap; D4 keyboard (arrows, Shift fire, z zapper) +
+mouse (SS.MsDelta, approved) + joystick, no spinner; D8 math coprocessor approved. The rest of the
+plan's recommendations stand unless I say otherwise.
 
-WHAT ONLY I CAN SUPPLY: the decisions; the hardware runs (bmtest's F key on the K2 first, then tline
-when it exists); whether I have or will get a spinner and what kind; approval of the $FEE0 exception.
-Don't wait on any of these to do the host work.
+HARDWARE: the rc16 line engine DROPS PIXELS (gaps that move run to run; K2, two cores). The FPGA
+developer is on it and we ASSUME A FIX. Re-run bmtest C then L, and C then F, on each new core.
+
+THIS SESSION: the D6 pilot. Translate WORSCR (ALDIS2:2208), MODSND (ALSOUN:270) and one display-list
+builder that uses STA NY,VGLIST into 6809, under the plan's two register models (A: 6502 X in B via
+ABX, Y in a page-1 byte; B: X and Y both in page-1 bytes), position-independent, lwasm. Measure size
+and cycles for each, check each against Atari's routine with a host 6502 emulator on the same inputs
+(the ROMs rebuild byte-identical, so the original binary is the oracle), and recommend a model with
+the size ratio it implies for the 40,192-byte module. Write it into docs/status.md. Then stop for my
+review before any translator or game code. No SS call code until I approve it.
+
+WHAT ONLY I CAN SUPPLY: hardware runs (tline once the core is fixed), new cores, and the decisions.
 
 GROUND RULES (from Joust, all still in force): Level 2 only. Position-independent code, OS-9 program
 modules, data through DP/U; a "make pic" check like Joust's tools/piccheck.py. No direct MMU access from
