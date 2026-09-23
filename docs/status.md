@@ -57,6 +57,14 @@ Characters are vector-ROM subroutines at `$3000`-`$31E3` (`VGMSGA` follows at `$
   and plotting a mask, rendered on the host from the same vector ROM so it looks identical) would
   remove most of them. Decide after `tline S`.
 
+**Text uses exactly two sizes.** Every message in `ALLANG`'s table (`MESS` lines 64-93) has scale 0
+(big: HIGH SCORES, PLAYER, AVOID SPIKES) or 1 (everything else); scores and the rating screen set scale
+1 (`ALSCO2` 50, 447, 1078). The one variable-scale site, `SCARNG` (`ALSCO2` 1339), zooms the **logo
+picture**, not characters. The attract capture agrees: character draws at binary scale 1 (97 a frame)
+and 0 (3.5), 31 distinct characters. So a host-rendered font needs **two sizes of about 40 glyphs**,
+drawn as masks in any colour. The VICKY text font and tile sets are fixed at 8×8 and cannot match
+either size; that is not a limit on masks, which are our own pixels.
+
 **Not yet done in stage 0:** a played game (only attract so far, whose demo is play-like), the 6502
 busy fraction, POKEY write logging, `tools/m65parse.py`.
 
