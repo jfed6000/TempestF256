@@ -174,6 +174,11 @@ colour and beam intensity through the CLUT (`colour × 16 + intensity` is exactl
 port-tempest 4.3). No glow, no thick lines, no tricks. What it costs: nothing extra per line. What it
 gives up: the vector monitor's bloom. Revisit after stage 2's photograph, if at all.
 
+> **Reopened by stage 0 (2026-09-22, `docs/status.md`):** characters are ~226 of ~473 line records in
+> a play frame and nearly all on text screens. If `tline S` shows a record costs what is estimated,
+> glyphs win: the interpreter spots a `JSRL` into the character ROM (`$3000`-`$31E3`) and plots a
+> host-rendered mask of the same character instead of its 4-8 strokes.
+
 **D3. Line-drawn text or glyph masks (yours).** Recommendation: **line-drawn**, because the text is
 already in the display list — the characters are vector-ROM subroutines, so the interpreter draws them
 for nothing extra in code. If stage 0 shows text is a large share of a frame's pixels, move only the
@@ -344,6 +349,9 @@ no interrupts; it does hold grfdrv, which is synchronous by design.
 the caller's map, so the driver's buffer mapping (`MapCallBuf`, block plus the next) must advance a
 block as the record pointer crosses one — the main cost of this change. Old callers pass ≤ 255 and see
 no difference. Only if stage 0 shows frames above 255 visible lines.
+
+*Stage 0 (2026-09-22): frames need 473 records (median, play) to 696 (max) but only ~3K-15K
+pixels. So (3) is justified by the numbers, and (1)/(2) probably are not.*
 
 **Worth building only if stage 1 says so**: `D` and `V` show how often a Tempest frame fills the FIFO,
 and `S` shows what a call costs. If a frame's lines rarely exceed 4,096 pixels, neither change buys

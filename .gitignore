@@ -16,3 +16,6 @@ __pycache__/
 
 # tempest_orig/ is Atari's source as released: keep every file in it, whatever its name
 !/tempest_orig/**
+
+# Stage 0 captures and renders (tools/avgcap.lua, tools/avgview.py): regenerable
+/captures/
