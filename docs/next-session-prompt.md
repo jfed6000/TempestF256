@@ -17,8 +17,8 @@ READ FIRST:
     grfdrv256-api.md, bitmap-api.md, driver-performance.md.
 
 WHERE THINGS STAND (2026-09-23): STAGE 0, THE D6 WORK (src/, committed 07e63de) AND STAGE 2'S
-INTERPRETER ON THE HOST ARE DONE, all host only. The interpreter is FOR REVIEW (docs/status.md,
-"Stage 2 on the host"; committed or not as I said):
+INTERPRETER ON THE HOST ARE DONE, all host only, committed (b7132f7, 51371d2). Two points are
+still FOR REVIEW (docs/status.md, "Stage 2 on the host"):
   - src/avg.a (AvgRun) walks the display list into SS.BmLine records (batches of 255 through the
     platform's AvgFlush) and a glyph text list; src/avgtab.a is generated (avgview.py --tables).
   - Its specification is tools/avgview.py's PortAVG (integer; the float pipeline stays as stage 0's
@@ -31,16 +31,15 @@ INTERPRETER ON THE HOST ARE DONE, all host only. The interpreter is FOR REVIEW (
 
 DECIDED: Rev 3; D3 glyph masks on a front text bitmap; D4 keyboard (arrows, Shift fire, z zapper) +
 mouse (SS.MsDelta, approved) + joystick, no spinner; D6 model B and its conventions; D8 math
-coprocessor approved, its multiplier too; hand-finished code in src/ (xlat/ generated, never edited); the D6 hand
-work's recommendations (ZATC4V, MBDV24, data area to $B9D). The rest of the plan's recommendations
+coprocessor approved, its multiplier too; hand-finished code in src/ (xlat/ generated, never
+edited); the D6 hand work's recommendations (ZATC4V, MBDV24, data area to $B9D). The rest of the plan's recommendations
 stand unless I say otherwise.
 
 HARDWARE: the rc16 line engine DROPS PIXELS (gaps that move run to run; K2, two cores). The FPGA
 developer is on it and we ASSUME A FIX. Re-run bmtest C then L, and C then F, on each new core.
 
 THIS SESSION: first my answers to docs/status.md "Stage 2 on the host", "Decided ..., and what is
-left" (the CPU budget; the layout), and whether to commit.
-Then, unless I choose otherwise: the platform layer (the hardware seams, the IRQ as the frame loop,
+left" (the CPU budget; the layout AVGPG $0C00 and window A's buffers). Then, unless I choose otherwise: the platform layer (the hardware seams, the IRQ as the frame loop,
 the module header, "make pic"), proposing its SS calls before any SS call code. Update
 docs/status.md as pieces land; stop and report at the end.
 
