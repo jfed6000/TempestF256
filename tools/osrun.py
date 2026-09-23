@@ -370,6 +370,18 @@ class Host(CPU6809):
             col, row = struct.unpack(">hh", t[2:6])
             gl = GLYPHS[(g & 0x7F) * 2 + (1 if g & 0x80 else 0)]
             gx, gy, gw, gh = gl[0], gl[1], gl[2], gl[3]
+            if self.hires[2]:                   # 640 dots, 2-byte rows, nibble colour + 1
+                nib = min((clut >> 4) + 1, 15)
+                for r in range(gh):
+                    bits = gl[4 + 2 * r] << 8 | gl[5 + 2 * r]
+                    for c in range(gw):
+                        if bits << c & 0x8000:
+                            x, y = 2 * col + gx + c, row + gy + r
+                            if 0 <= x < 2 * W and 0 <= y < H:
+                                o = y * W + x // 2
+                                want[o] = (want[o] & 0x0F | nib << 4) if x % 2 == 0 \
+                                    else (want[o] & 0xF0 | nib)
+                continue
             for r in range(gh):
                 bits = gl[4 + r]
                 for c in range(gw):
@@ -426,8 +438,10 @@ class Host(CPU6809):
             row = bytearray([0])
             for x in range(2 * W):                  # 640 wide: the 320 planes' dots doubled
                 i = text[y * W + x // 2]
+                if self.hires[2]:
+                    i = i >> 4 if x % 2 == 0 else i & 15
                 if i:
-                    b, g, r, _ = self.clut[i]
+                    b, g, r, _ = self.clut1[i] if self.hires[2] else self.clut[i]
                 elif hi:
                     v = lines[y * W + x // 2]
                     v = v >> 4 if x % 2 == 0 else v & 15
@@ -459,7 +473,7 @@ def clut_int(cram, index):
 
 
 def load_glyphs():
-    """GlyTab from src/glyphs.a, 15 bytes a record, as signed/unsigned values."""
+    """GlyTab from src/glyphs.a, 15 bytes a record (26 for a 640 plane's), as signed/unsigned values."""
     out = []
     for line in open(os.path.join(SRC, "glyphs.a")):
         if line.startswith("\tfcb\t"):

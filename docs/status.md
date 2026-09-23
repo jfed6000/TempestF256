@@ -1084,6 +1084,16 @@ every frame.
 **The K2 with the text fix (user, 2026-09-23): 2,246 game frames, 10,390 passes in 173 s: 13.0
 game frames a second, no ticks lost** (10,380 ticks, within the sign-off's ±60).
 
+**The fonts at 640 (user: "a little too thick ... don't look crisp like the actual game"; untested
+on hardware).** The glyphs were masks rendered at 320 columns, so on a 640 display every vertical
+stroke was 2 dots wide. Now the text bitmap is a 640 4-bit plane too (`BmHi` on bitmap 2, CLUT 1,
+the lines' 16 colours), `tools/glyphs.py --hires` renders the masks from the vector ROM at 640
+columns with 1-dot strokes (16-dot, 2-byte rows, 26-byte records; normal glyphs 8×6 at most, big
+14×11), and `TxDraw` doubles an entry's column and writes each dot as a nibble (colour + 1, as
+the lines). The rows stay 240, so the small font is still 6 rows tall. `osrun.py` checks the 640
+text plane: play and attract, every frame right. `HIRES` = 0 now also needs main's `text.a` and
+`glyphs.a`.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

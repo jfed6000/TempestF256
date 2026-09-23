@@ -17,6 +17,12 @@
 *   (Map1, SWIN); a pixel's place is row * 320 + column, block and
 *   offset in the 10 blocks from TXBLK.  Pixels off the bitmap are not
 *   drawn.  Runs with U = the data area.
+*
+*   Branch hires640: the text bitmap is a 640x240 plane at 4 bits a dot
+*   (gfx.a BmHi, CLUT 1, the lines' 16 colours), so glyphs are drawn at
+*   640 with 1-dot strokes (glyphs.a from tools/glyphs.py --hires): an
+*   entry's column is doubled, and each dot is a nibble, the left one
+*   high.  HIRES = 0 needs main's text.a and glyphs.a back.
 ********************************************************************
 
 TXLIST              equ       $1800               in window A (avg.a)
@@ -24,8 +30,8 @@ GL.X                equ       0                   glyphs.a: a mask's record, 15 
 GL.Y                equ       1
 GL.W                equ       2
 GL.H                equ       3
-GL.ROWS             equ       4                   up to 11 rows, a byte each, the leftmost pixel bit 7
-GL.LEN              equ       15
+GL.ROWS             equ       4                   up to 11 rows, 2 bytes each, the leftmost dot bit 15
+GL.LEN              equ       26
 
 ********************************************************************
 * TxCommit - draw the changes since the last frame's text
@@ -86,8 +92,16 @@ tc4                 cmpd      AVGPG+AV.TCNT,u     every new entry
                     beq       tc6
                     lbsr      TxMarked            on a marked row?
                     beq       tc6
-tc5                 lda       1,x                 its colour
-                    sta       TXCLR,u
+tc5                 lda       1,x                 its colour << 4 | intensity: the nibble colour + 1,
+                    lsra                          as the lines' (gfx.a AvgFlush), on CLUT 1
+                    lsra
+                    lsra
+                    lsra
+                    inca
+                    cmpa      #16
+                    blo       tc5a
+                    lda       #15
+tc5a                sta       TXCLR,u
                     lbsr      TxDraw
                     lbsr      TxSpnd
 tc6                 leax      6,x
@@ -380,10 +394,20 @@ TxDraw              pshs      x,y
                     sta       TXNR,u              rows left
                     leay      GL.ROWS,y
                     sty       TXGLY,u             the next row's bits
-* the columns: first = column + x; skip the ones left of 0, cut the ones right of 319
+* the columns, in 640ths: first = column * 2 + x; skip the ones left of 0, cut the ones right of 639
+                    lda       TXCLR,u             the colour in both nibbles' places
+                    lsla
+                    lsla
+                    lsla
+                    lsla
+                    sta       TXCLH,u
+                    ldd       2,x
+                    lslb
+                    rola
+                    pshs      d
                     ldb       -GL.ROWS+GL.X,y
                     sex
-                    addd      2,x
+                    addd      ,s++
                     clr       TXSKP,u
                     tsta
                     bpl       td2
@@ -396,15 +420,22 @@ td2                 std       TXCOL,u             the first column drawn
                     lbls      tdx                 all of it left of the bitmap
                     stb       TXPIX,u
                     ldd       TXCOL,u
-                    cmpd      #319
+                    cmpd      #639
                     lbhi      tdx                 all of it right of the bitmap
-                    addb      TXPIX,u             past column 320?
+                    addb      TXPIX,u             past column 640?
                     adca      #0
-                    subd      #320
-                    bls       td3
+                    subd      #640
+                    bls       td2a
                     negb
                     addb      TXPIX,u
                     stb       TXPIX,u
+td2a                ldd       TXCOL,u             two dots a byte: the byte, and which half
+                    andb      #1
+                    stb       TXPAR,u             0 = the high nibble, the left dot
+                    ldd       TXCOL,u
+                    lsra
+                    rorb
+                    std       TXCOL,u             TXCOL is the byte column from here
 * the rows: first = row + y; skip the ones above 0
 td3                 ldb       -GL.ROWS+GL.Y,y
                     sex
@@ -413,7 +444,7 @@ td4                 tsta
                     bpl       td5
                     addd      #1                  above row 0
                     ldx       TXGLY,u
-                    leax      1,x
+                    leax      2,x
                     stx       TXGLY,u
                     dec       TXNR,u
                     bne       td4
@@ -432,7 +463,7 @@ td6                 tst       TXCLR,u
                     sta       ,x
 td7                 lbsr      TxRun               this row
                     ldx       TXGLY,u
-                    leax      1,x
+                    leax      2,x
                     stx       TXGLY,u
                     ldd       TXROW,u
                     addd      #1
@@ -450,16 +481,20 @@ td8                 std       TXROFS,u
                     bne       td6
 tdx                 puls      x,y,pc
 
-* TxRun - one row: the bits at TXGLY shifted past TXSKP, TXPIX pixels
-*   from block TXBK, offset TXROFS, in TXCLR
-TxRun               lda       [TXGLY,u]
+* TxRun - one row: the 16 bits at TXGLY shifted past TXSKP, TXPIX dots
+*   from block TXBK, offset TXROFS, the first in the half TXPAR says; a
+*   dot set writes its nibble, TXCLR (right) or TXCLH (left)
+TxRun               ldd       [TXGLY,u]
+                    pshs      d                   ,s = the bits
                     ldb       TXSKP,u
                     beq       tr2
-tr1                 lsla
+tr1                 lsl       1,s
+                    rol       ,s
                     decb
                     bne       tr1
-tr2                 ldb       TXPIX,u
-                    pshs      a,b                 ,s = bits, 1,s = pixels left
+tr2                 lda       TXPIX,u
+                    ldb       TXPAR,u
+                    pshs      a,b                 ,s = dots left, 1,s = the half, 2,s = the bits
                     lda       TXBK,u
                     adda      TXBLK,u
                     leax      SWIN,u
@@ -468,29 +503,41 @@ tr2                 ldb       TXPIX,u
                     tfr       d,y
                     leay      $2000,y             Y = its end
                     addd      TXROFS,u
-                    tfr       d,x                 X = the first pixel
-                    lda       TXCLR,u
-tr3                 lsl       ,s
+                    tfr       d,x                 X = the first dot's byte
+tr3                 lsl       3,s
+                    rol       2,s
                     bcc       tr4
-                    sta       ,x
-tr4                 leax      1,x
-                    dec       1,s
+                    lda       ,x
+                    tst       1,s
+                    bne       tr3r
+                    anda      #$0F                the left dot
+                    ora       TXCLH,u
+                    bra       tr3w
+tr3r                anda      #$F0                the right
+                    ora       TXCLR,u
+tr3w                sta       ,x
+tr4                 dec       ,s
                     beq       trx
+                    lda       1,s
+                    eora      #1
+                    sta       1,s
+                    bne       tr3                 now the right half: the same byte
+                    leax      1,x
                     pshs      y                   at the block's end?
                     cmpx      ,s++
                     blo       tr3
-                    pshs      a                   the row goes on in the next block
-                    lda       TXBK,u
+                    lda       TXBK,u              the row goes on in the next block
                     inca
                     adda      TXBLK,u
                     leax      SWIN,u
                     lbsr      Map1
+                    bcs       trx
                     tfr       d,x
                     tfr       d,y
                     leay      $2000,y
-                    puls      a
-                    bcc       tr3
-trx                 puls      a,b,pc
+                    bra       tr3
+trx                 leas      4,s
+                    rts
 
 * TxOff - TXROW (0-239), TXCOL (0-319): X = the pixel's offset in its
 *   block, A = the block (0-9) in the bitmap

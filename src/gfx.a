@@ -72,6 +72,9 @@ gi2                 lda       ,x+
                     ldy       #1
                     bsr       BmHi
                     bcs       gix
+                    ldy       #2                  the text too (text.a)
+                    bsr       BmHi
+                    bcs       gix
                     endc
                     ldx       #FX_GRF+FX_BM       console text off, bitmaps only (the MCR's low byte)
                     ldy       #0                  320x240, 60 Hz
@@ -128,6 +131,8 @@ GfxExit
                     ldy       #0
                     bsr       BmLo
                     ldy       #1
+                    bsr       BmLo
+                    ldy       #2
                     bsr       BmLo
                     endc
                     lda       BMOWN,u

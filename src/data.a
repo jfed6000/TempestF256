@@ -50,6 +50,8 @@ TXROFS               rmb       2                   text.a: the row's offset in i
 TXBK                rmb       1                   text.a: the row's block in the bitmap
 TXSKP               rmb       1                   text.a: pixels cut on the left
 TXPIX               rmb       1                   text.a: pixels drawn a row
+TXPAR               rmb       1                   text.a: the first dot's half of its byte (0 = left, high)
+TXCLH               rmb       1                   text.a: TXCLR << 4, the left dot's nibble
 TXNR                rmb       1                   text.a: rows left
 FLSHN               rmb       1                   AvgFlush: tries left while the FIFO is full
 
