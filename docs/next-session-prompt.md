@@ -5,7 +5,7 @@ Paste the block below to start the next session, from ~/projects/wild/tempest.
 ```
 We're porting Atari's arcade TEMPEST (Rev 3, the source's "2A(alt)") to NitrOS-9 Level 2 on the
 Wildbits F256 (6809, rc16 FPGA core, K2 and Jr2). Joust, the first game on this platform, is finished in
-~/projects/wild/joust. This folder is a local git repo (branch main, no remote until I say so).
+~/projects/wild/joust. This folder is a local git repo (main and hires640, no remote until I say so).
 
 READ FIRST:
   - docs/status.md: state, decisions, hardware findings, stage 0's numbers. Start here.
@@ -16,53 +16,30 @@ READ FIRST:
   - docs/port-guide.md (generic platform guide) and, from ~/projects/wild/joust/docs, only as needed:
     grfdrv256-api.md, bitmap-api.md, driver-performance.md.
 
-WHERE THINGS STAND (2026-09-23): STAGE 0, THE D6 WORK, STAGE 2'S INTERPRETER ON THE HOST (its CPU
-budget and layout approved) AND NOW THE PLATFORM LAYER ARE DONE, host and MAME only. The platform
-layer is FOR REVIEW (docs/status.md, "The platform layer"):
-  - src/tempest, a 34,693-byte OS-9 module (src/makefile: make = build, budget, make pic; make
-    install DSK= is the targeted copy). src/tempest.a is still the host tests' build of the game.
-  - The IRQ is ALHAR2's own on a virtual 246.09375 Hz clock (525/128 of the tick, src/frame.a);
-    RANDOM is a generator (src/hw.a) that xlattest mirrors read for read; ZPOKST and ZPONTS are
-    neutralised; the text bitmap redraws only what changed (src/text.a).
-  - ONE PASS A TICK, AS JOUST (SS.Tick was proposed and withdrawn): the game frame is split, a
-    logic pass then drawing passes, the drawing a coroutine (DrwBeg/DrwRes/Spend) that gives the
-    tick back on an estimated budget; AvgFlush sizes each next batch (avg.a's new AV.RMAX).
-  - tools/osrun.py runs the module on the host 6809 with every os9 call scripted: 120 s of play,
-    every game frame checked (text bitmap, CLUT, line bitmap), 245.9 virtual IRQs a second, 1 tick
-    lost in 7,200, but 14 GAME FRAMES A SECOND (21 unsplit). In the Wildbits MAME (no line
-    engine) it starts, takes 5 and 1, shows the attract and rating screens, and q exits cleanly;
-    its game clock ran slow there (unexplained; MAME is no timing evidence).
-  - Committed: 8a5f02a (the platform layer before the split). The split and the sign-off numbers:
-    not committed unless I said so.
+WHERE THINGS STAND (2026-09-23, end of the optimisation session; docs/status.md "Optimising, and
+640x240" has it all):
+  - main 6b76ef7 + dacdbbb: the split frame (one pass a tick), the clear armed in the logic pass
+    (SS.BmClear mode 7 waited a whole tick for vertical blank: one tick lost a game frame), the
+    text list matched with a look-ahead (the high score screen no longer redraws every entry).
+    K2, 320: 15.4 game frames and 59.8 passes a second.
+  - BRANCH hires640 (checked out): the lines AND the text on 640x240 4-bit planes (SS.BmCfg
+    HIRES4, CLUT 1, colour + 1 as the nibble, intensity 12); glyphs rendered at 640 with 1-dot
+    strokes (tools/glyphs.py --hires); text columns in 640ths from the beam's fraction (avg.a
+    AVTX64). K2: 13.0 game frames a second with attract in the run, no ticks lost; "looks
+    better". The logo's smear is the 240 rows (MAME's own frame drawn at 640x240 shows it).
+    Line endpoints are still a 320 position doubled. Not merged into main: my call.
+  - nitros9 wb/multiterm ec0cc198 (committed, NOT PUSHED): SS.BmLine takes X to 639 with a
+    640-pixel FIFO margin on a HIRES4 plane. On both disk images with the hires640 tempest.
+  - tools/osrun.py now models the DMA engine's vertical-blank timing, GetStat SS.BmClear's
+    diagnostic R$Y/R$U, SS.BmCfg, 4-bit planes and CLUT 1.
 
-DECIDED: Rev 3; D3 glyph masks on a front text bitmap; D4 keyboard (arrows, Shift fire, z zapper) +
-mouse (SS.MsDelta, approved) + joystick, no spinner; D6 model B and its conventions; D8 math
-coprocessor approved, its multiplier too; hand-finished code in src/ (xlat/ generated, never
-edited); the D6 hand work's recommendations; stage 2: redundant dots dropped, the CPU budget
-(heavy frames stretch, no tuning before tline S) and the layout (AVGPG $0C00, window A) approved.
-The rest of the plan's recommendations stand unless I say otherwise.
-
-HARDWARE: THE LINE ENGINE IS FIXED (user, 2026-09-23) and tempest RUNS ON THE K2: the picture is
-right (the user's photograph), but "it plays, but it is really slow". The build on the K2 image
-prints "G game frames, P passes in S s" on q: passes/s below 60 means ticks lost, frames/s is the
-real rate (the host model says 14.7 and 60). The developer has now sent a NEW CORE WITH THE LINE
-ENGINE AND A 640x240 BITMAP MODE: nothing about it is known here yet (the defs list only 320x240
-and 320x200 bitmaps, wildbits.d:866). Re-run bmtest C then L, and C then F, on each new core.
-
-THIS SESSION: OPTIMIZE, AND LOOK AT 640x240.
-  1. The speed: I bring the sign-off's numbers from the K2 (frames, passes, seconds). From them,
-     decide where the time goes (the driver's real SS.BmLine cost against osrun.py's guess, lost
-     ticks, the split's slack) and speed it up. Remedies already written down (docs/status.md,
-     "The split frame"): real costs in the budgets, overlapping the logic with the drawing as the
-     arcade does, the raster row as an exact clock (a new absolute-address exception: my call),
-     and interpreter tuning; tline S measures the driver directly.
-  2. 640x240: find out from the new core's RTL (and whatever the developer sent) how the mode is
-     set and what the line engine and SS.BmLine/SS.BmClear need for it; whether grfdrv256 needs
-     changes (propose any SS call change for my review first); what it costs the port (bitmap
-     memory ~19 blocks a bitmap, the clear, the text bitmap, the interpreter's scale and clip).
-Update docs/status.md as pieces land; stop and report at the end.
-
-WHAT ONLY I CAN SUPPLY: hardware runs (tline once the core is fixed), new cores, and the decisions.
+THIS SESSION: Q&A AND BRAINSTORMING ON PERFORMANCE. I want to understand what the interpreter
+(src/avg.a, its specification tools/avgview.py PortAVG, docs/status.md "Stage 2 on the host") does:
+walk me through it at my pace, answer questions, and brainstorm where the frame's time goes and how
+to win it back (the numbers: docs/status.md "Time", "The split frame", "Optimising"). Explain and
+propose; change code only when I ask. Candidate ideas already written down: tighter budget
+estimates (RECUS), overlapping the logic with the drawing, the raster row as an exact clock (a new
+absolute-address exception, my call), faster glyph drawing, fewer logo copies, tline S.
 
 GROUND RULES (from Joust, all still in force): Level 2 only. Position-independent code, OS-9 program
 modules, data through DP/U; a "make pic" check like Joust's tools/piccheck.py. No direct MMU access from
