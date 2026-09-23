@@ -41,7 +41,7 @@ HIRES               equ       1                   the line bitmaps 640x240 (gfx.
 AVCOLL              equ       1                   small shapes collapsed (avg.a AvShp; status.md "Small shapes collapsed")
                     ifndef    RECUS
                     ifne      HIRES
-RECUS               equ       170                 a record, interpreted, made 640 (~9 us) and drawn
+RECUS               equ       150                 a record, interpreted, made 640 (~9 us) and drawn (170 before: status.md "RECUS")
                     else
 RECUS               equ       160                 a record, interpreted and drawn (more than 128: gfx.a NxtBat)
                     endc

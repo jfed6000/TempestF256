@@ -1184,6 +1184,28 @@ screen, `q` and the sign-off.
 Also: the program's `SS.DScrn` is now spelled **`SS.MCR`** (`wildbits.d`'s name for the same code;
 `SS.Layer` was already used for `$8E`), and `osrun.py` uses both new names. Module byte-identical.
 
+## RECUS 150 (2026-09-23, host only) — prepared for the run after the current one
+
+`RECUS` is the frame loop's estimate of what one line record costs (µs): interpreting it, making it
+640, and the driver drawing it. `AvgFlush` charges each `SS.BmLine` batch `records × RECUS +
+CALLUS` to the pass's budget, and `NxtBat` sizes the next batch to what the budget still covers.
+Too high: passes end with time unused and a game frame takes more of them. Too low: a pass runs
+past its tick and loses it (the game's clock, one pass a tick, runs slow). It must stay 129-255
+(an 8-bit operand, and `RECK` = 32768/`RECUS` a byte).
+
+The sweep (`osrun.py` 60 s each, with `AVCOLL` and without `BmWait`; the driver's cost guessed):
+
+| `RECUS` | 170 | 160 | 155 | **150** | 140 | 130 |
+|---|---:|---:|---:|---:|---:|---:|
+| Game frames a second | 14.6 | 14.6 | 14.8 | **15.4** | 15.7 | 16.1 |
+| Ticks lost of 3,600 | 5 | 14 | 27 | **44** | 73 | 103 |
+
+**150 is in `frame.a`, committed; NOT on the disk images**, which hold the build before it
+(`78acb1e`, under test). What the hardware run says: game frames a second against the run before,
+and **passes a second** from the sign-off (60 = no tick lost; the model loses 1.2% at 150, i.e.
+~59.3). The model's driver cost is a guess, and the K2 drew faster than it guesses (3.9 passes a
+game frame against 4.1), so the hardware may lose fewer. If it loses more than ~1%: 160.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
