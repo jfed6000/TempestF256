@@ -45,10 +45,15 @@ HW_60DB	equ	HWSHAD+34
 HW_60DF	equ	HWSHAD+35
 HW_60E0	equ	HWSHAD+36
 
-* The integer coprocessor (D8, the approved absolute exception): 16/16 unsigned divide, all
-* big-endian (JR_Math_Block.v).  Shared with other programs (fm), so every use is masked.
+AVGPG	equ	$0C00		the AVG interpreter's page, DP while it runs (avg.a)
+
+* The integer coprocessor (D8, the approved absolute exception): 16/16 unsigned divide and
+* 16x16 unsigned multiply, all big-endian (JR_Math_Block.v).  Shared with other programs (fm), so every use is masked.
+CP.MA	equ	$FEE0		multiplicand (16x16 unsigned multiply, combinational)
+CP.MB	equ	$FEE2		multiplier
 CP.DVSR	equ	$FEE4		divisor
 CP.DVND	equ	$FEE6		dividend
+CP.PROD	equ	$FEF0		product, 32 bits
 CP.QUOT	equ	$FEF4		quotient
 CP.REM	equ	$FEF6		remainder (right from rc14 on)
 

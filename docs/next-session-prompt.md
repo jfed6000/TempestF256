@@ -16,35 +16,33 @@ READ FIRST:
   - docs/port-guide.md (generic platform guide) and, from ~/projects/wild/joust/docs, only as needed:
     grfdrv256-api.md, bitmap-api.md, driver-performance.md.
 
-WHERE THINGS STAND (2026-09-23): STAGE 0 COMPLETE; D6 PILOT, TRANSLATOR (xlat/) AND THE D6 HAND
-WORK DONE, all host only. The hand work is FOR REVIEW (docs/status.md, "D6 hand work"; not yet
-committed):
-  - src/ is the game, hand-finished from the draft (28,352 bytes): WORSCR and CASCAL on the
-    coprocessor (CASCAL's Math Box overflow reproduced exactly), src/reloc.a relocating the address
-    tables at start-up, the BIT/flag/decimal sites, GETOP3, and COIN65 (ALCOIN) in 6809.
-  - tools/xlattest.py --src tests it: named tests with code, data area and window all moved; the
-    fuzz; and --states, whole game frames (EXSTAT, NONSTA, DISPLA) from MAME's own RAM, recorded by
-    tools/avgcap.lua AVGCAP_RAM into captures/ (regenerable). All 2,417 recorded frames (a played
-    game and attract) are byte-exact against the Rev 3 ROM; the game logic costs 7.5 ms a frame.
-  - Found and fixed on the way: ZATC4V anti-tamper (now in docs/port-tempest.md 2.4), a cross-file
-    label distance the draft relied on (MSGLBS).
-  - HAND markers left (78) are the platform layer's: hardware shadows, the IRQ, RESET, the dropped
-    self-test's dispatch entries.
+WHERE THINGS STAND (2026-09-23): STAGE 0, THE D6 WORK (src/, committed 07e63de) AND STAGE 2'S
+INTERPRETER ON THE HOST ARE DONE, all host only. The interpreter is FOR REVIEW (docs/status.md,
+"Stage 2 on the host"; committed or not as I said):
+  - src/avg.a (AvgRun) walks the display list into SS.BmLine records (batches of 255 through the
+    platform's AvgFlush) and a glyph text list; src/avgtab.a is generated (avgview.py --tables).
+  - Its specification is tools/avgview.py's PortAVG (integer; the float pipeline stays as stage 0's
+    reference to MAME). tools/avgtest.py runs it on the host 6809: every captured frame and 20,000
+    random lists byte-exact, coprocessor and software multiply.
+  - 17.4 ms a play frame at 8 MHz (median; 22.7 ms 95%): with the game's 7.5 ms and the driver's
+    ~6 ms it fits the median frame with little room. The budget is the main review point.
+  - Proposed, not done: dropping redundant dot records; using the D8 coprocessor's multiplier
+    (built that way, software behind AVGSWM) needs your approval.
 
 DECIDED: Rev 3; D3 glyph masks on a front text bitmap; D4 keyboard (arrows, Shift fire, z zapper) +
 mouse (SS.MsDelta, approved) + joystick, no spinner; D6 model B and its conventions; D8 math
-coprocessor approved; hand-finished code in src/ (xlat/ generated, never edited). The rest of the
-plan's recommendations stand unless I say otherwise.
+coprocessor approved; hand-finished code in src/ (xlat/ generated, never edited); the D6 hand
+work's recommendations (ZATC4V, MBDV24, data area to $B9D). The rest of the plan's recommendations
+stand unless I say otherwise.
 
 HARDWARE: the rc16 line engine DROPS PIXELS (gaps that move run to run; K2, two cores). The FPGA
 developer is on it and we ASSUME A FIX. Re-run bmtest C then L, and C then F, on each new core.
 
-THIS SESSION: first my answers to docs/status.md "D6 hand work", "For review" (ZATC4V; CASCAL's exact
-overflow path; the data area to $B9D), and whether to commit. Then, unless I choose otherwise, the
-proposed next step: stage 2's interpreter on the host - the 6809 AVG interpreter, run on the host
-6809 over stage 0's captured frames and checked record for record against tools/avgview.py (its
-hardware half waits for the fixed core). Propose any SS call it needs before coding it; no SS call
-code until I approve it. Update docs/status.md as pieces land; stop and report at the end.
+THIS SESSION: first my answers to docs/status.md "Stage 2 on the host", "For review" (the CPU
+budget and what to do about it; the coprocessor multiplier; the layout), and whether to commit.
+Then, unless I choose otherwise: the platform layer (the hardware seams, the IRQ as the frame loop,
+the module header, "make pic"), proposing its SS calls before any SS call code. Update
+docs/status.md as pieces land; stop and report at the end.
 
 WHAT ONLY I CAN SUPPLY: hardware runs (tline once the core is fixed), new cores, and the decisions.
 
@@ -79,6 +77,9 @@ TOOLING (all in the Joust tree, shared):
     -n 30 (~25 min), --src --states captures/states_play.bin captures/states_attract.bin (~3 min).
     The captures are regenerable (command in docs/status.md, "D6 hand work", 4); run the fuzz in the
     background and never "pkill -f" a pattern your own command line contains.
+  - The interpreter's test: python3 tools/avgtest.py captures/avg_play.bin captures/avg_attract.bin
+    (~8 min; --sw for the software multiply) and --fuzz 10000 (~5 min). avgview.py --verify, --compare,
+    --port [--png DIR --frames N]. The avg_*.bin captures are regenerable (docs/status.md, stage 2).
   - The D6 pilot test: python3 tools/d6pilot.py (-n cases; ~90 s at 2,000). It calls lwasm.orig --6809
     directly: the coco-shelf "lwasm" wrapper adds --map/--list and fails with --format=raw. The
     listing's cycle counts are 6809 ones only with --6809 (without it lwasm counts 6309 cycles).

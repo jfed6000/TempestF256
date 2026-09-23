@@ -1,0 +1,1002 @@
+* avg.a - the AVG interpreter (plan stage 2): Atari's display list, walked once a game frame, into
+* line records for SS.BmLine and a text list for the glyph bitmap (plan D3).  Written by hand; its
+* specification is tools/avgview.py's PortAVG, and tools/avgtest.py checks it against that record
+* for record over MAME's captured frames.
+*
+* The arithmetic (PortAVG's comment has the derivation): the beam is kept in bitmap pixels, 16.8,
+* three bytes an axis (AV.COL, AV.ROW: integer high and middle, fraction low).  A vector moves it by
+* v_eff * Q / 256 an axis, truncated toward zero, where v_eff is the component with MAME's
+* normalisation truncation or timer clamp applied, and Q = round(L * 12/29 * 256 / 2^bs) is set
+* by each SCAL (L = linear scale ^ $FF, bs the binary scale).  Endpoints are rounded to whole
+* pixels (half up), clipped in integers and sent as 8-byte records, 255 at most a batch.
+*
+* VG addresses: word addresses below $800 are vector RAM (window A), $800-$FFF vector ROM (VROM, in
+* the module).  The list's words are little-endian: low byte first.
+*
+* Data: the interpreter's page, AVGPG in the data area, is DP while it runs (so the data area must
+* be page-aligned, as OS-9 allocates it).  Records are batched in window A from $1000 (2,040 bytes),
+* texts from $1800 (256 entries of 6 bytes).
+
+LEFT	equ	1			outcodes
+RIGHT	equ	2
+TOP	equ	4
+BOTTOM	equ	8
+BMW	equ	320			the bitmap
+BMH	equ	240
+MAXJMP	equ	1024			control transfers before a list counts as a runaway
+MAXTXT	equ	256			text entries
+RBATCH	equ	255			records a batch (SS.BmLine's limit)
+
+* The page (offsets; DP = AVGPG's page while AvgRun runs, U = its base in the main loop).
+AV.JT	equ	0			16: op*2 -> handler, built at entry (the module is PIC)
+AV.COL	equ	16			3: beam column, 16.8, half a pixel high (AvCtr)
+AV.ROW	equ	19			3: beam row, the same
+AV.Q	equ	22			2: Q
+AV.CLT	equ	24			2: T below this: zero vector, or bs >= 4's clamp
+AV.BS	equ	26			binary scale
+AV.SCL	equ	27			linear scale
+AV.COLR	equ	28			colour << 4
+AV.INT	equ	29			STAT intensity
+AV.STCL	equ	30			colour << 4 | STAT intensity: Z = 1's CLUT index
+AV.SP	equ	31			AVG stack pointer, 0-15
+AV.STK	equ	32			8: the AVG stack, 4 pointers (a ring, as MAME's)
+AV.VRAM	equ	40			2: vector RAM (window A)
+AV.VROM	equ	42			2: vector ROM (the module)
+AV.RBUF	equ	44			2: the record batch
+AV.RPTR	equ	46			2: the next record
+AV.RLFT	equ	48			records the batch still has room for
+AV.TPTR	equ	49			2: the next text entry
+AV.TCNT	equ	51			2: text entries (out: the count, at most MAXTXT)
+AV.JMP	equ	53			2: control transfers left
+AV.END	equ	55			out: 1 = the list ended (HALT, JMPL 0); 0 = a runaway, cut off
+AV.GMAP	equ	56			2: AvGMap (module)
+AV.GTAB	equ	58			2: AvGTab (module)
+AV.VX	equ	60			2: this vector's x (signed; v_eff)
+AV.VY	equ	62			2: y
+AV.T	equ	64			2: scratch
+AV.T0	equ	66			scratch
+AV.CLUT	equ	67			this vector's CLUT index
+AV.LC	equ	68			2: a line's start, column
+AV.LR	equ	70			2: row
+AV.DATA	equ	77			2: the data area (for AvgFlush)
+AV.MH	equ	79			a multiplier's high byte
+AV.ML	equ	80			and low
+AV.P0	equ	81			4: clip: p0 (x, y)
+AV.P1	equ	85			4: clip: p1
+AV.OC	equ	89			clip: an outcode
+AV.C0	equ	90			clip: p0's outcode
+AV.C1	equ	91			clip: p1's outcode
+AV.STEP	equ	92			clip: steps
+AV.MA	equ	93			2: muldiv a (then |a|)
+AV.MB	equ	95			2: muldiv b
+AV.MC	equ	97			2: muldiv c
+AV.NEG	equ	99			muldiv: bit 0 = negate the result
+AV.PR	equ	100			4: muldiv's product, then the dividend
+AV.SAVY	equ	104			2: Y around the clip
+AV.LSCL	equ	106			2: the last SCAL word (as LDD reads it); 0: none
+AV.CLON	equ	108			non-zero when bs >= 4 (the VCTR clamp is possible)
+
+* AvgRun - interpret the display list in window A once.
+* In: U = the data area (VWIN set; page-aligned).  Out: AVGPG+AV.TCNT texts at window A + $1800,
+* AVGPG+AV.END; records handed to AvgFlush in batches.  U and DP kept, the rest clobbered.
+* AvgFlush (the platform's) is called with X = the records, B = the count (1-255), U = the data
+* area, DP = its page; it may clobber everything but S.
+AvgRun	pshs	u,dp
+	tfr	u,d
+	adda	#AVGPG/256
+	tfr	a,dp
+	stu	<AV.DATA
+	leau	AVGPG,u			U = the page, for the jump table and the stack
+	ldx	VWIN-AVGPG,u
+	stx	<AV.VRAM
+	stx	<AV.STK			the stack's four entries: the list's start, as MAME's zeroes
+	stx	<AV.STK+2
+	stx	<AV.STK+4
+	stx	<AV.STK+6
+	leax	$1000,x
+	stx	<AV.RBUF
+	stx	<AV.RPTR
+	leax	$0800,x
+	stx	<AV.TPTR
+	leax	VROM,pcr
+	stx	<AV.VROM
+	leax	AvGMap,pcr
+	stx	<AV.GMAP
+	leax	AvGTab,pcr
+	stx	<AV.GTAB
+	leax	AvLoop,pcr		the jump table: 0 VCTR (not used: tested first), 1 HALT, 2 SVEC,
+	stx	<AV.JT			3 STAT/SCAL, 4 CNTR, 5 JSRL, 6 RTSL, 7 JMPL
+	leax	AvHalt,pcr
+	stx	<AV.JT+2
+	leax	AvSvec,pcr
+	stx	<AV.JT+4
+	leax	AvStat,pcr
+	stx	<AV.JT+6
+	leax	AvCntr,pcr
+	stx	<AV.JT+8
+	leax	AvJsrl,pcr
+	stx	<AV.JT+10
+	leax	AvRtsl,pcr
+	stx	<AV.JT+12
+	leax	AvJmpl,pcr
+	stx	<AV.JT+14
+	clra
+	clrb
+	std	<AV.TCNT
+	sta	<AV.END
+	sta	<AV.SP
+	sta	<AV.COLR
+	sta	<AV.INT
+	sta	<AV.STCL
+	sta	<AV.BS
+	sta	<AV.SCL
+	std	<AV.LSCL
+	ldd	#MAXJMP
+	std	<AV.JMP
+	lda	#RBATCH
+	sta	<AV.RLFT
+	lbsr	AvSetQ
+	bsr	AvCtr
+	ldy	<AV.VRAM		PC = 0
+	bra	AvLoop
+
+* AvCtr - the beam to the centre, (160, 120).  The beam is kept half a pixel high (+$80), so
+* that its integer bytes are the rounded pixel.
+AvCtr	ldd	#160
+	std	<AV.COL
+	ldd	#120
+	std	<AV.ROW
+	lda	#$80
+	sta	<AV.COL+2
+	sta	<AV.ROW+2
+	rts
+
+* The main loop.  Y = the AVG's PC (a 6809 pointer), U = the page.
+AvCntr	bsr	AvCtr
+	leay	2,y
+AvLoop	lda	1,y			the word's high byte: the opcode in bits 7-5
+	cmpa	#$20
+	lbhs	AvOp
+* VCTR: dy 13 bits, then Z (3 bits) and dx 13 bits.  v_eff = v when both components are in
+* -512..511 (the high byte $FE-$01) and bs < 4; otherwise T, the OR of the components'
+* magnitudes-less-one, decides.
+	anda	#$1F
+	eora	#$10			sign-extend
+	suba	#$10
+	ldb	,y
+	std	<AV.VY
+	adda	#2
+	cmpa	#4
+	bhs	_AvS1
+	lda	3,y
+	anda	#$1F
+	eora	#$10
+	suba	#$10
+	ldb	2,y
+	std	<AV.VX
+	adda	#2
+	cmpa	#4
+	bhs	_AvS2
+	tst	<AV.CLON
+	beq	_Av3
+	bra	_AvS2
+_AvS1	lda	3,y
+	anda	#$1F
+	eora	#$10
+	suba	#$10
+	ldb	2,y
+	std	<AV.VX
+_AvS2	ldd	<AV.VY
+	bpl	_Av1
+	coma
+	comb
+_Av1	std	<AV.T
+	ldd	<AV.VX
+	bpl	_Av2
+	coma
+	comb
+_Av2	ora	<AV.T
+	orb	<AV.T+1
+	cmpd	#$0200
+	bhs	_AvBig
+	cmpd	<AV.CLT
+	blo	_AvTny
+_Av3	ldb	3,y			Z in bits 7-5
+	leay	4,y
+* AvZ: B = the byte with Z in bits 7-5: move, and draw unless the intensity is 0.
+AvZ	andb	#$E0
+	beq	AvMv
+	cmpb	#$20
+	bne	_AZ1
+	ldb	<AV.STCL		Z = 1: STAT's intensity
+	bitb	#$0F
+	bne	AvDraw
+	bra	AvMv
+_AZ1	lsrb				Z * 2
+	lsrb
+	lsrb
+	lsrb
+	orb	<AV.COLR
+	bra	AvDraw
+
+_AvBig	cmpa	#$08			n < 3: drop the low 3-n bits
+	bhs	_Av4
+	cmpa	#$04
+	bhs	_Av5
+	ldb	#$FE
+	bra	_Av6
+_Av4	ldb	#$F8
+	bra	_Av6
+_Av5	ldb	#$FC
+_Av6	tfr	b,a
+	anda	<AV.VX+1
+	sta	<AV.VX+1
+	andb	<AV.VY+1
+	stb	<AV.VY+1
+	bra	_Av3
+
+* T below AV.CLT: a zero vector, or components -1 and 0, or bs >= 4's clamp: shift both by
+* bs - 3 - bitlen(T), T in D.
+_AvTny	std	<AV.T
+	ldd	<AV.VX
+	bne	_AT1
+	ldd	<AV.VY
+	beq	_Av3			a zero vector: no move
+_AT1	lda	<AV.BS
+	cmpa	#4
+	blo	_Av3			not a clamp
+	ldb	<AV.T+1
+	leax	AvBitl,pcr
+	suba	b,x
+	suba	#3
+	bsr	AvShl
+	bra	_Av3
+
+AvMv	bsr	AvMove
+	lbra	AvLoop
+
+* AvDraw: B = the CLUT index.  The line from the beam to where the vector leaves it: a record,
+* clipped if an end is off the bitmap.
+AvDraw	stb	<AV.CLUT
+	ldx	<AV.RPTR
+	ldd	<AV.COL			the start
+	std	<AV.LC
+	cmpd	#BMW-1
+	bhi	_DS			(unsigned: negatives too)
+	std	,x
+	ldd	<AV.ROW
+	std	<AV.LR
+	cmpd	#BMH-1
+	bhi	_DS1
+	stb	4,x
+	lbsr	AvMove			(X kept)
+	ldd	<AV.COL			the end
+	cmpd	#BMW-1
+	bhi	_DC
+	std	2,x
+	ldd	<AV.ROW
+	cmpd	#BMH-1
+	bhi	_DC
+	stb	5,x
+_D1	lda	<AV.CLUT
+	clrb
+	std	6,x
+	leax	8,x
+	stx	<AV.RPTR
+	dec	<AV.RLFT
+	lbne	AvLoop
+	lbsr	AvFlsh
+	lbra	AvLoop
+_DS	ldd	<AV.ROW
+	std	<AV.LR
+_DS1	lbsr	AvMove
+_DC	lbsr	AvClip			carry set: nothing left
+	lbcs	AvLoop
+	ldx	<AV.RPTR
+	ldd	<AV.P0
+	std	,x
+	ldd	<AV.P1
+	std	2,x
+	lda	<AV.P0+3
+	ldb	<AV.P1+3
+	std	4,x
+	bra	_D1
+
+* AvShl - shift AV.VX and AV.VY left A times (A > 0).
+AvShl	lsl	<AV.VX+1
+	rol	<AV.VX
+	lsl	<AV.VY+1
+	rol	<AV.VY
+	deca
+	bne	AvShl
+	rts
+
+* AvMove - COL += vx * Q / 256, ROW -= vy * Q / 256, each truncated toward zero.  On the
+* coprocessor's 16x16 multiplier (D8's unit, combinational: PipeStages 0), masked while it holds
+* our operands, as the divide is; AVGSWM assembles the software multiply instead.
+	ifndef	AVGSWM
+AvMove	pshs	cc
+	orcc	#$50
+	ldd	<AV.Q
+	std	CP.MB
+	ldd	<AV.VX
+	beq	_AM4
+	bmi	_AM2
+	std	CP.MA
+	ldd	CP.PROD+1		|v| * Q >> 8: the low 16 bits
+	addd	<AV.COL+1
+	std	<AV.COL+1
+	lda	<AV.COL
+	adca	CP.PROD			and the high byte
+	sta	<AV.COL
+	bra	_AM4
+_AM2	coma
+	comb
+	addd	#1
+	std	CP.MA
+	ldd	<AV.COL+1
+	subd	CP.PROD+1
+	std	<AV.COL+1
+	lda	<AV.COL
+	sbca	CP.PROD
+	sta	<AV.COL
+_AM4	ldd	<AV.VY			the row: a positive vy moves up (subtracts)
+	beq	_AM8
+	bmi	_AM6
+	std	CP.MA
+	ldd	<AV.ROW+1
+	subd	CP.PROD+1
+	std	<AV.ROW+1
+	lda	<AV.ROW
+	sbca	CP.PROD
+	sta	<AV.ROW
+	puls	cc,pc
+_AM6	coma
+	comb
+	addd	#1
+	std	CP.MA
+	ldd	CP.PROD+1
+	addd	<AV.ROW+1
+	std	<AV.ROW+1
+	lda	<AV.ROW
+	adca	CP.PROD
+	sta	<AV.ROW
+_AM8	puls	cc,pc
+	else
+* The software multiply: a component below 256 takes two MULs; one up to $1000 takes AvMulW.
+AvMove	ldd	<AV.VX
+	beq	_AM4
+	bmi	_AM2
+	tsta
+	bne	_AM1
+	stb	<AV.ML
+	lda	<AV.Q+1
+	mul
+	sta	<AV.T0
+	lda	<AV.ML
+	ldb	<AV.Q
+	mul
+	addb	<AV.T0
+	adca	#0
+	addd	<AV.COL+1
+	std	<AV.COL+1
+	bcc	_AM4
+	inc	<AV.COL
+	bra	_AM4
+_AM1	lbsr	AvMulW
+	addd	<AV.COL+1
+	std	<AV.COL+1
+	lda	<AV.COL
+	adca	<AV.T0
+	sta	<AV.COL
+	bra	_AM4
+_AM2	coma
+	comb
+	addd	#1
+	tsta
+	bne	_AM3
+	stb	<AV.ML
+	lda	<AV.Q+1
+	mul
+	sta	<AV.T0
+	lda	<AV.ML
+	ldb	<AV.Q
+	mul
+	addb	<AV.T0
+	adca	#0
+	std	<AV.T
+	ldd	<AV.COL+1
+	subd	<AV.T
+	std	<AV.COL+1
+	bcc	_AM4
+	dec	<AV.COL
+	bra	_AM4
+_AM3	lbsr	AvMulW
+	std	<AV.T
+	ldd	<AV.COL+1
+	subd	<AV.T
+	std	<AV.COL+1
+	lda	<AV.COL
+	sbca	<AV.T0
+	sta	<AV.COL
+_AM4	ldd	<AV.VY			the row: a positive vy moves up (subtracts)
+	beq	_AM8
+	bmi	_AM6
+	tsta
+	bne	_AM5
+	stb	<AV.ML
+	lda	<AV.Q+1
+	mul
+	sta	<AV.T0
+	lda	<AV.ML
+	ldb	<AV.Q
+	mul
+	addb	<AV.T0
+	adca	#0
+	std	<AV.T
+	ldd	<AV.ROW+1
+	subd	<AV.T
+	std	<AV.ROW+1
+	bcc	_AM8
+	dec	<AV.ROW
+	rts
+_AM5	bsr	AvMulW
+	std	<AV.T
+	ldd	<AV.ROW+1
+	subd	<AV.T
+	std	<AV.ROW+1
+	lda	<AV.ROW
+	sbca	<AV.T0
+	sta	<AV.ROW
+	rts
+_AM6	coma
+	comb
+	addd	#1
+	tsta
+	bne	_AM7
+	stb	<AV.ML
+	lda	<AV.Q+1
+	mul
+	sta	<AV.T0
+	lda	<AV.ML
+	ldb	<AV.Q
+	mul
+	addb	<AV.T0
+	adca	#0
+	addd	<AV.ROW+1
+	std	<AV.ROW+1
+	bcc	_AM8
+	inc	<AV.ROW
+_AM8	rts
+_AM7	bsr	AvMulW
+	addd	<AV.ROW+1
+	std	<AV.ROW+1
+	lda	<AV.ROW
+	adca	<AV.T0
+	sta	<AV.ROW
+	rts
+
+* AvMulW - D = |v| (up to $1000) -> AV.T0:D = floor(|v| * Q / 256), 24 bits.
+AvMulW	std	<AV.MH			AV.MH, AV.ML = |v|
+	lda	<AV.ML
+	ldb	<AV.Q+1
+	mul				ML*QL: only its high byte counts
+	sta	<AV.T0
+	lda	<AV.ML
+	ldb	<AV.Q
+	mul				ML*QH
+	addb	<AV.T0
+	adca	#0
+	std	<AV.T
+	lda	<AV.MH
+	ldb	<AV.Q+1
+	mul				MH*QL (MH <= $10: no carry out of 16 bits)
+	addd	<AV.T
+	std	<AV.T
+	lda	<AV.MH
+	ldb	<AV.Q
+	mul				MH*QH, one byte up
+	addb	<AV.T
+	adca	#0
+	sta	<AV.T0			the high byte
+	tfr	b,a
+	ldb	<AV.T+1
+	rts
+
+	endc
+
+AvOp	lsra				op * 2
+	lsra
+	lsra
+	lsra
+	anda	#$0E
+	jmp	[a,u]
+
+* SVEC: dy 5 bits in the high byte, Z and dx 5 bits in the low.  v_eff = 2 * v5, shifted left
+* by bs - 4 - bitlen(T5) when that is positive (the 8-bit timer's clamp).
+AvSvec	lda	1,y
+	anda	#$1F
+	eora	#$10
+	suba	#$10
+	lsla
+	tfr	a,b
+	sex
+	std	<AV.VY
+	ldb	,y
+	andb	#$1F
+	eorb	#$10
+	subb	#$10
+	lslb
+	sex
+	std	<AV.VX
+	lda	<AV.BS
+	suba	#4
+	bls	_AS3			bs <= 4: never clamped
+	sta	<AV.T0
+	ldb	<AV.VX+1		T5 = t(vx5) | t(vy5); the components are 2 * v5
+	orb	<AV.VY+1
+	beq	_AS3			a zero vector
+	ldb	<AV.VX+1
+	bpl	_AS1
+	comb
+_AS1	lda	<AV.VY+1
+	bpl	_AS2
+	coma
+_AS2	sta	<AV.T
+	orb	<AV.T
+	lsrb				(2t or 2t+1) >> 1 = t
+	leax	AvBitl,pcr
+	lda	<AV.T0
+	suba	b,x
+	bls	_AS3
+	lbsr	AvShl
+_AS3	ldb	,y			Z in bits 7-5
+	leay	2,y
+	lbra	AvZ
+
+* AvFlsh - hand the batch to AvgFlush, with the data area's U and DP.
+AvFlsh	lda	#RBATCH
+	suba	<AV.RLFT
+	beq	_AF1
+	tfr	a,b
+	pshs	y,u,dp
+	ldx	<AV.RBUF
+	ldu	<AV.DATA
+	pshs	b
+	tfr	u,d
+	tfr	a,dp
+	puls	b
+	lbsr	AvgFlush
+	puls	y,u,dp
+	ldx	<AV.RBUF
+	stx	<AV.RPTR
+	lda	#RBATCH
+	sta	<AV.RLFT
+_AF1	rts
+
+* STAT and SCAL.
+AvStat	lda	1,y
+	bita	#$10
+	bne	_ST3
+	ldb	,y
+	leay	2,y
+	bita	#$08
+	beq	_ST1
+	andb	#$0F			colour
+	lslb
+	lslb
+	lslb
+	lslb
+	stb	<AV.COLR
+	orb	<AV.INT
+	stb	<AV.STCL
+	lbra	AvLoop
+_ST1	lsrb				intensity
+	lsrb
+	lsrb
+	lsrb
+	stb	<AV.INT
+	orb	<AV.COLR
+	stb	<AV.STCL
+	lbra	AvLoop
+_ST3	ldd	,y
+	leay	2,y
+	cmpd	<AV.LSCL
+	lbeq	AvLoop			the same as the last: Q stands
+	std	<AV.LSCL
+	andb	#$07
+	stb	<AV.BS
+	sta	<AV.SCL
+	bsr	AvSetQ
+	lbra	AvLoop
+
+* AvSetQ - Q = round(round(L * 27118 / 256) / 2^bs), L = scale ^ $FF; AV.CLT = 2^(bs-4), or 1.
+AvSetQ	ldb	<AV.SCL
+	comb
+	stb	<AV.T0			L
+	lda	#$EE
+	mul
+	addd	#$0080
+	sta	<AV.T			(L * $EE + $80) >> 8
+	lda	<AV.T0
+	ldb	#$69
+	mul
+	addb	<AV.T
+	adca	#0			D = Q0
+	std	<AV.Q
+	lda	<AV.BS
+	beq	_SQ3
+	deca				(Q0 >> (bs-1)) + 1, >> 1
+	beq	_SQ2
+_SQ1	lsr	<AV.Q
+	ror	<AV.Q+1
+	deca
+	bne	_SQ1
+_SQ2	ldd	<AV.Q
+	addd	#1
+	lsra
+	rorb
+	std	<AV.Q
+_SQ3	ldb	#1
+	lda	<AV.BS
+	suba	#4
+	blo	_SQ5
+	beq	_SQ5			bs = 4: AV.CLT = 1
+_SQ4	lslb
+	deca
+	bne	_SQ4
+_SQ5	clra
+	std	<AV.CLT
+	lda	<AV.BS
+	suba	#3			AV.CLON: bs >= 4
+	bhi	_SQ6
+	clra
+_SQ6	sta	<AV.CLON
+	rts
+
+* JSRL: a character at a text scale becomes a text entry and the glyph's advance; anything else
+* is called.
+AvJsrl	lda	1,y
+	anda	#$1F
+	ldb	,y
+	std	<AV.T			t, the target's word address
+	subd	#$0800
+	cmpd	#AvGMLen
+	bhs	_JS2			not a character routine (below $800 wraps high)
+	tst	<AV.SCL
+	bne	_JS2
+	tst	<AV.BS
+	beq	_JS1
+	pshs	a
+	lda	<AV.BS
+	cmpa	#1
+	puls	a
+	bne	_JS2
+_JS1	ldx	<AV.GMAP
+	leax	d,x
+	lda	,x
+	cmpa	#$FF
+	bne	AvGlyph
+_JS2	ldd	<AV.JMP
+	subd	#1
+	std	<AV.JMP
+	beq	AvStop
+	ldb	<AV.SP
+	andb	#3
+	lslb
+	leax	AV.STK,u
+	abx
+	leay	2,y
+	sty	,x
+	ldb	<AV.SP
+	incb
+	andb	#$0F
+	stb	<AV.SP
+	ldd	<AV.T
+	bsr	AvTgt
+	lbra	AvLoop
+
+* AvTgt - D = a word address (13 bits) -> Y.  $1000 up wraps, as the AVG's 13-bit bus does.
+AvTgt	anda	#$0F
+	cmpd	#$0800
+	bhs	_TG1
+	lslb
+	rola
+	addd	<AV.VRAM
+	tfr	d,y
+	rts
+_TG1	subd	#$0800
+	lslb
+	rola
+	addd	<AV.VROM
+	tfr	d,y
+	rts
+
+AvRtsl	ldd	<AV.JMP
+	subd	#1
+	std	<AV.JMP
+	beq	AvStop
+	lda	<AV.SP
+	deca
+	anda	#$0F
+	sta	<AV.SP
+	anda	#3
+	lsla
+	leax	AV.STK,u
+	ldy	a,x
+	lbra	AvLoop
+
+AvJmpl	lda	1,y
+	anda	#$1F
+	ldb	,y
+	std	<AV.T
+	beq	AvHalt			JMPL 0: the end of the pass
+	ldd	<AV.JMP
+	subd	#1
+	std	<AV.JMP
+	beq	AvStop
+	ldd	<AV.T
+	bsr	AvTgt
+	lbra	AvLoop
+
+AvHalt	inc	<AV.END
+AvStop	lbsr	AvFlsh
+	puls	u,dp,pc
+
+* AvGlyph - A = the glyph; B's size from AV.BS (0: big).  AvGTab: 9 bytes a glyph and size, the
+* normal size first: the advance (column, row: 3 bytes each, 16.8), the scale it leaves
+* (binary, linear; $FF: unchanged), its intensity (0: draws nothing).
+AvGlyph	sta	<AV.T0
+	ldb	#18
+	mul
+	tst	<AV.BS
+	bne	_GL1
+	addd	#9
+_GL1	addd	<AV.GTAB
+	tfr	d,x
+	ldb	8,x
+	beq	_GL3			a blank: the advance only
+	ldd	<AV.TCNT
+	cmpd	#MAXTXT
+	bhs	_GL3
+	addd	#1
+	std	<AV.TCNT
+	pshs	u
+	ldu	<AV.TPTR
+	lda	<AV.T0
+	tst	<AV.BS
+	bne	_GL2
+	ora	#$80
+_GL2	ldb	8,x
+	orb	<AV.COLR
+	std	,u
+	ldd	<AV.COL			the rounded beam
+	std	2,u
+	ldd	<AV.ROW
+	std	4,u
+	leau	6,u
+	stu	<AV.TPTR
+	puls	u
+_GL3	ldd	<AV.COL+1
+	addd	1,x
+	std	<AV.COL+1
+	lda	<AV.COL
+	adca	,x
+	sta	<AV.COL
+	ldd	<AV.ROW+1
+	addd	4,x
+	std	<AV.ROW+1
+	lda	<AV.ROW
+	adca	3,x
+	sta	<AV.ROW
+	lda	6,x
+	cmpa	#$FF
+	beq	_GL4
+	sta	<AV.BS
+	lda	7,x
+	sta	<AV.SCL
+	clr	<AV.LSCL
+	clr	<AV.LSCL+1
+	lbsr	AvSetQ
+_GL4	leay	2,y
+	lbra	AvLoop
+
+* AvClip - Cohen-Sutherland on whole pixels, as PortAVG's clip_int: (LC, LR) to the beam, into
+* AV.P0/AV.P1 (x, y: 16 bits each).  Carry set: nothing left.
+AvClip	sty	<AV.SAVY
+	ldd	<AV.LC
+	std	<AV.P0
+	ldd	<AV.LR
+	std	<AV.P0+2
+	ldd	<AV.COL
+	std	<AV.P1
+	ldd	<AV.ROW
+	std	<AV.P1+2
+	leax	AV.P0,u			every coordinate within +-8192
+	ldb	#4
+_CL1	lda	,x++
+	adda	#$20			-$2000..$1FFF -> $00xx..$3Fxx
+	cmpa	#$40
+	lbhs	_CLno
+	decb
+	bne	_CL1
+	clr	<AV.STEP
+_CL2	leax	AV.P0,u
+	lbsr	AvCode
+	stb	<AV.C0
+	leax	AV.P1,u
+	lbsr	AvCode
+	stb	<AV.C1
+	orb	<AV.C0
+	beq	_CLyes
+	ldb	<AV.C1
+	andb	<AV.C0
+	bne	_CLno
+	lda	<AV.STEP
+	cmpa	#4
+	beq	_CLno
+	inc	<AV.STEP
+	leax	AV.P0,u			P = p0 if it is outside, else p1; Y = the other
+	leay	AV.P1,u
+	ldb	<AV.C0
+	bne	_CL3
+	exg	x,y
+	ldb	<AV.C1
+_CL3	bitb	#LEFT|RIGHT
+	beq	_CL5
+	andb	#LEFT			b = 0 or 319
+	bne	_CL4
+	ldd	#BMW-1
+	fcb	$8C			(cmpx #: skips the clra/clrb)
+_CL4	clra
+	clrb
+	std	<AV.T			Py += muldiv(Oy - Py, b - Px, Ox - Px); Px = b
+	subd	,x
+	std	<AV.MB
+	ldd	2,y
+	subd	2,x
+	std	<AV.MA
+	ldd	,y
+	subd	,x
+	std	<AV.MC
+	bsr	AvMdiv
+	addd	2,x
+	std	2,x
+	ldd	<AV.T
+	std	,x
+	bra	_CL2
+_CL5	andb	#TOP			b = 0 or 239
+	bne	_CL6
+	ldd	#BMH-1
+	fcb	$8C
+_CL6	clra
+	clrb
+	std	<AV.T			Px += muldiv(Ox - Px, b - Py, Oy - Py); Py = b
+	subd	2,x
+	std	<AV.MB
+	ldd	,y
+	subd	,x
+	std	<AV.MA
+	ldd	2,y
+	subd	2,x
+	std	<AV.MC
+	bsr	AvMdiv
+	addd	,x
+	std	,x
+	ldd	<AV.T
+	std	2,x
+	lbra	_CL2
+_CLyes	ldy	<AV.SAVY
+	andcc	#$FE
+	rts
+_CLno	ldy	<AV.SAVY
+	orcc	#$01
+	rts
+
+* AvCode - X = a point -> B = its outcode.
+AvCode	clrb
+	lda	,x
+	bpl	_CC1
+	orb	#LEFT
+	bra	_CC2
+_CC1	pshs	b
+	ldd	,x
+	cmpd	#BMW-1
+	puls	b
+	ble	_CC2
+	orb	#RIGHT
+_CC2	lda	2,x
+	bpl	_CC3
+	orb	#TOP
+	rts
+_CC3	pshs	b
+	ldd	2,x
+	cmpd	#BMH-1
+	puls	b
+	ble	_CC4
+	orb	#BOTTOM
+_CC4	rts
+
+* AvMdiv - D = round(MA * MB / MC), halves away from zero: (2|a||b| + |c|) / (2|c|), then the
+* sign.  |a|, |b|, |c| below 16384 (the +-8192 limit), so the quotient fits 16 bits.  X, Y kept.
+AvMdiv	clr	<AV.NEG
+	ldd	<AV.MA
+	bpl	_MD1
+	com	<AV.NEG
+	coma
+	comb
+	addd	#1
+	std	<AV.MA
+_MD1	ldd	<AV.MB
+	bpl	_MD2
+	com	<AV.NEG
+	coma
+	comb
+	addd	#1
+	std	<AV.MB
+_MD2	ldd	<AV.MC
+	bpl	_MD3
+	com	<AV.NEG
+	coma
+	comb
+	addd	#1
+	std	<AV.MC
+_MD3	lda	<AV.MA+1		PR = |a| * |b|, 32 bits
+	ldb	<AV.MB+1
+	mul
+	std	<AV.PR+2
+	lda	<AV.MA
+	ldb	<AV.MB
+	mul
+	std	<AV.PR
+	lda	<AV.MA+1
+	ldb	<AV.MB
+	mul
+	addd	<AV.PR+1
+	std	<AV.PR+1
+	bcc	_MD4
+	inc	<AV.PR
+_MD4	lda	<AV.MA
+	ldb	<AV.MB+1
+	mul
+	addd	<AV.PR+1
+	std	<AV.PR+1
+	bcc	_MD5
+	inc	<AV.PR
+_MD5	lsl	<AV.PR+3		2 * PR + |c|
+	rol	<AV.PR+2
+	rol	<AV.PR+1
+	rol	<AV.PR
+	ldd	<AV.PR+2
+	addd	<AV.MC
+	std	<AV.PR+2
+	bcc	_MD6
+	inc	<AV.PR+1
+	bne	_MD6
+	inc	<AV.PR
+_MD6	lsl	<AV.MC+1		2|c|
+	rol	<AV.MC
+	pshs	x
+	ldx	#16			divide PR by it: 16 steps, the quotient into PR+2
+_MD7	lsl	<AV.PR+3
+	rol	<AV.PR+2
+	rol	<AV.PR+1
+	rol	<AV.PR
+	ldd	<AV.PR
+	subd	<AV.MC
+	blo	_MD8
+	std	<AV.PR
+	inc	<AV.PR+3
+_MD8	leax	-1,x
+	bne	_MD7
+	puls	x
+	ldd	<AV.PR+2
+	tst	<AV.NEG
+	beq	_MD9
+	coma
+	comb
+	addd	#1
+_MD9	rts
+
+* bitlen(n) for n = 0-15.
+AvBitl	fcb	0,1,2,2,3,3,3,3,4,4,4,4,4,4,4,4

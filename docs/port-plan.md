@@ -122,6 +122,10 @@ Then the same on the **Jr2** once it has the fixed core. These five numbers deci
 
 ### Stage 2 — the interpreter on the machine: `avgplay`
 
+*Host half done 2026-09-23, for review (`docs/status.md`, "Stage 2 on the host"): `src/avg.a`,
+byte-exact against `avgview.py`'s `PortAVG` on every captured frame; 17.4 ms a play frame at 8 MHz.
+The hardware half below waits for the fixed core.*
+
 The 6809 AVG interpreter, playing stage 0's captured frames from a file at the game's rate. The first
 real picture, checked against `avgview`'s PNG of the same frame; then timed. Proves the interpreter,
 the mapping, the CLUT, the clipping and the draw path before any game code exists.
@@ -368,6 +372,10 @@ no difference. Only if stage 0 shows frames above 255 visible lines.
 
 *Stage 0 (2026-09-22): frames need 473 records (median, play) to 696 (max) but only ~3K-15K
 pixels. So (3) is justified by the numbers, and (1)/(2) probably are not.*
+
+*Stage 2 on the host (2026-09-23): with glyph text a play frame needs 206 records (median), 415 at
+most, and the attract logo 646; the interpreter hands them over in batches of 255, so **(3) is not
+needed**.*
 
 **Worth building only if stage 1 says so**: `D` and `V` show how often a Tempest frame fills the FIFO,
 and `S` shows what a call costs. If a frame's lines rarely exceed 4,096 pixels, neither change buys
