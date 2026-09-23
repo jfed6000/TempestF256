@@ -209,6 +209,27 @@ content show through, pixels landing at the wrong address, or the capture path (
 faults before). The next run separates them: `C` (clear) then `F` on a known background, photographed
 directly, twice.
 
+**Narrowed the same day, K2, DMA-fixed core — THE LINE ENGINE LOSES PIXELS.** Four bmtest runs,
+photographed:
+
+| Run | Result |
+|---|---|
+| `C` (DMA clear to blue) | clean |
+| `R` (colour bars, CPU-written) | clean |
+| `C` then `L` (16-line fan, ~3,000 pixels, under the FIFO's 4,096) | **gaps in the lines**; nothing stray off them |
+| `C` then `F` (flood) | the "specks" are **blue**: the cleared background showing through |
+| `C` then `L`, repeated | **the gaps move every time** |
+
+So pixels are **dropped**, not misplaced, not lost to a FIFO overrun (the fan cannot overrun it), not
+the register order (checked against the RTL: `TinyVicky_BM_Registers.v:35`, `TinyVickyCoreModule.v:447-458`)
+and not the Bresenham (every line is in the right place, colour and length). Moving gaps mean **timing**,
+not address. **Hypothesis, untested:** the drain writes a pixel on a cycle the memory arbiter predicts
+the CPU will leave free (`Time2Draw_i`, "1 clock ahead", `LineDraw.v` `Read_FIFO`); when the prediction
+is wrong the pixel leaves the FIFO and is never written. The DMA fix changed the CPU/bus arbitration,
+and a bitmap-sparkle core regression has been seen before (guide section 13). Next, one change each:
+the fan at normal CPU speed instead of turbo (contention should drop), and on the pre-fix core (`R`
+then `L`, no `C`). **This blocks Tempest**: a vector game with dashed lines is not playable.
+
 What else nobody has measured, and what the plan's first hardware stage measures:
 
 | Number | Why it decides something | Estimate, unchecked |
