@@ -230,6 +230,11 @@ and a bitmap-sparkle core regression has been seen before (guide section 13). Ne
 the fan at normal CPU speed instead of turbo (contention should drop), and on the pre-fix core (`R`
 then `L`, no `C`). **This blocks Tempest**: a vector game with dashed lines is not playable.
 
+**A newer core (2026-09-22, same day): the DMA still works, the lines still have holes.** Drawing the
+fan twice in a row fills **most** of them in: each pass drops a different random subset, which is what
+the timing hypothesis predicts, and it rules out a pixel the engine never generates. Drawing twice is a
+workaround for testing, not for the game: it doubles the cost and still leaves holes.
+
 What else nobody has measured, and what the plan's first hardware stage measures:
 
 | Number | Why it decides something | Estimate, unchecked |
