@@ -1206,6 +1206,58 @@ and **passes a second** from the sign-off (60 = no tick lost; the model loses 1.
 ~59.3). The model's driver cost is a guess, and the K2 drew faster than it guesses (3.9 passes a
 game frame against 4.1), so the hardware may lose fewer. If it loses more than ~1%: 160.
 
+## Hardware: the collapse and BmWait build works (user, 2026-09-23)
+
+`78acb1e` (small shapes collapsed, `BmWait` removed) runs on the K2 (user: "current build
+works"; no numbers given). **A new core followed** (user): the line engine's pixel FIFO doubled,
+more RAM access time, other optimisations — expected faster. Not yet measured with this port;
+the driver's FIFO margin in `SS.BmLine` (640 pixels) could grow with it (a driver change, for review).
+
+## Sound: tsnd, the POKEY image on the SIDs (2026-09-23, host and MAME) — untested on hardware
+
+Plan stage 4, D5 (a). **`src/sound.a`**: `SndInit`, `SndOut` (once a pass), `SndExit`, and **`tsnd`,
+the sound test: `tempest s`** (the text screen stays; `0`-`9` `a` `b` `c` start sounds 0-12 through
+`FSNDON`, as the game's calls do; `r` plays the sequence; `x` stops; `q` quits). **The game does not
+call `SndOut` yet**: the game path is as before but for three trivial lines (the parameter read,
+`GFXON`, `SndExit` in `Cleanup`).
+
+**What the FPGA has** (read in `fpga-6809-cores-staging`, not changed): the SIDs are at physical
+`$18_8000` = block **`$C4`**: left `+$000`, right `+$100`, and `+$080` ("mono") writes **both**
+(`SID_OPL3_Interface.v`: two `sid6581` instances, Gideon Zweijtzer's core). **Two SIDs, six voices,
+not the plan's three and nine**; the guide and the plan are corrected. The SID clock is 14.318 MHz
+/ 15 = **954,545 Hz**; the SIDs, OPL3 and PSGs are mixed in the FPGA and sent to the codec over I2S
+(`SoundChips2DAC_Interface.v`), so no codec input to select for them. Both SIDs are summed to both
+channels unless system control bit (`ControlRegisters[1][3]`) says stereo; left alone. The Jr2's
+top module wires them the same way. Reached through the service window with `Map1` (`F$MapBlk`),
+no absolute address: `SndOut` maps block `$C4` when the text drawing has borrowed the window.
+
+**What Tempest asks of it** (stock MAME, 300 s of the scripted game, every POKEY write logged):
+channels sounding at once: 0 34.1%, 1 25.1%, 2 28.1%, 3 11.1%, 4 1.5%, **5 0.1%, never 6**; POKEY
+1 channel 4 never. `AUDCTL` always 0 (64 kHz base, no joins, no filters). `AUDC` forms: `$A`
+(pure tone) most, `$8` (17-bit noise), and the 5-bit polys `$0`, `$2`, `$6`. **So six voices are
+enough, handed out as channels start sounding.**
+
+**The mapping** (POKEY at 12.096 MHz / 8 = 1.512 MHz, base 54,000 Hz): a pure tone becomes a
+50% pulse at 27,000 / (`AUDF`+1) Hz (SID frequency 474,555 / (`AUDF`+1), held to `$FFFF`); every
+polynomial form becomes SID noise stepped as often as the POKEY samples its polys (SID frequency
+59,319 / (`AUDF`+1), one coprocessor divide); the volume becomes the sustain level (attack, decay,
+release 0). A SID's envelope does not climb to a raised sustain, so a louder volume, or a new
+waveform, re-gates the voice (gate off, 25 µs, gate on): **unchecked on the soft SID**, like the
+sustain-down path. The 5-bit polys as plain noise is the roughest approximation.
+
+**Tests:** `tools/sndtest.py` runs `tempest s` on the host, presses `r`, taps every SID write and,
+after every pass, checks each sounding channel has one gated voice with the right waveform,
+frequency and sustain, and no stray voice: **2,699 passes, 0 wrong**, 1,420 SID writes in 45 s,
+136 re-gates. The Wildbits MAME runs `tempest s` (help text, the sequence, `q`) and the game
+(title, coin, start, rating screen, sign-off), but **it has no sound at all** (its WAV has no
+channels), so the ears are the hardware's. **The reference**: `tools/sndref.lua` plays the same
+sequence in stock MAME from the arcade's own RAM (what `FSNDON` writes) — `captures/sndref_arcade.wav`
+and a DC-free copy to listen to, `captures/sndref_arcade_listen.wav` (the sequence starts at 10 s:
+13 sounds of 2.5 s — cursor, explosion, fire, pulsation, special, dies, thrust tube, thrust space,
+enemy shot, enemy line, slam, 3 seconds, pulsar off (silent: it only stops) — then thrust + fire
+and pulsation + explosion, 4 s each). Module 38,684 bytes; `make pic` clean. **On both disk
+images, with `RECUS` 150** (the game's run of that is the other test on this image).
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

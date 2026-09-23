@@ -56,6 +56,7 @@ name                fcs       /tempest/
                     include   input.a
                     include   gfx.a
                     include   text.a
+                    include   sound.a             the POKEY image on the SIDs; tsnd
 * the vector generator, and the tables it and the text bitmap read.  AvgFlush sizes each batch
 * from the pass's budget (gfx.a NxtBat), so the drawing can give the tick back between them
                     include   avg.a

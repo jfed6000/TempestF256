@@ -233,7 +233,7 @@ The counts-per-turn scaling goes in the settings file, so the feel is tuned with
 
 | | How | CPU a frame | New work / risk |
 |---|---|---|---|
-| a | **SID mapping**: one SID voice per POKEY channel (3 SIDs = 9 voices ≥ 8); `AUDF` → frequency, pure tone → pulse, noise forms → noise waveform, volume via the sustain level | Tiny: register writes when the image changes | Unexercised chips; whether the soft SIDs honour a sustain change mid-note is unchecked; POKEY's polynomial noise only approximated |
+| a | **SID mapping**: one SID voice per sounding POKEY channel (**2 SIDs = 6 voices**, handed out as channels start; Tempest sounds at most 5 at once — docs/status.md "Sound"; the plan first counted 3 SIDs); `AUDF` → frequency, pure tone → pulse, noise forms → noise waveform, volume via the sustain level | Tiny: register writes when the image changes | Unexercised chips; whether the soft SIDs honour a sustain change mid-note is unchecked; POKEY's polynomial noise only approximated |
 | b | **PSG mapping**: 4-bit POKEY volume maps onto the PSG's 4-bit attenuation directly; tones exact; one noise channel per PSG, clocked from a tone channel | Tiny | Only one noise voice per chip; noise character differs |
 | c | **VS1053, samples**: Joust's path, recordings from `mame -wavwrite`, mixed in software | ~1 ms mixing several voices | Tempest's sounds are continuous and overlap (thrust, pulsation) and vary with play: a sample per sound loses that |
 | d | **VS1053, POKEY synthesised in software** to PCM | ~10% of the CPU at 6 kHz; more for fewer artefacts | Exact behaviour, costly; high tones alias at 6 kHz |

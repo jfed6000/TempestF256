@@ -7,11 +7,16 @@
 ********************************************************************
 * start - U = the data area, DP = its page (OS-9)
 ********************************************************************
-start               tfr       u,x                 clear the data area below the stack
+start               lda       ,x                  the parameters' first character (above StkBase)
+                    pshs      a
+                    tfr       u,x                 clear the data area below the stack
                     ldy       #StkBase
 st1                 clr       ,x+
                     leay      -1,y
                     bne       st1
+                    puls      a
+                    ora       #$20                (lower case)
+                    sta       TSMODE,u
                     tfr       u,d                 the pseudo-registers' pointers: the data
                     sta       <RXP                area's page, the low byte the 6502 register
                     sta       <RYP
@@ -36,6 +41,9 @@ st1                 clr       ,x+
                     lbsr      AWinInit            window A: vector RAM, records, texts
                     lbcs      Quit
                     lbsr      RELINI              the address tables (reloc.a), after VWIN
+                    lda       TSMODE,u            "tempest s": the sound test instead (sound.a)
+                    cmpa      #'s
+                    lbeq      Tsnd
                     lbsr      GfxInit             bitmaps, CLUT, layers, display
                     lbcs      Quit
                     lbsr      InInit              the mouse, if SS.MsDelta answers
@@ -136,7 +144,8 @@ u1x                 rts
 * Cleanup - every exit path: the mouse, the signals, the display, the
 *   windows, the sign-off, the terminal's options
 ********************************************************************
-Cleanup             lbsr      InExit              the mouse back to pointer mode
+Cleanup             lbsr      SndExit             the SIDs silent (before the window goes)
+                    lbsr      InExit              the mouse back to pointer mode
                     lbsr      WSigClr             stop the driver signalling a dead process
                     lbsr      GfxExit
                     leax      SWIN,u

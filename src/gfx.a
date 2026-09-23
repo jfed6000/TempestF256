@@ -27,7 +27,8 @@ HIINT               equ       12                  the intensity the 16 colours s
 * GfxInit - bitmaps 0-2, cleared; the CLUT; the layers; the display on.
 *   Exit: carry = error in B
 ********************************************************************
-GfxInit             ldb       #0
+GfxInit             inc       GFXON,u             (GfxExit: undo it, even a part)
+                    ldb       #0
 gi1                 pshs      b
                     lbsr      AllocBm
                     puls      b
@@ -126,7 +127,8 @@ flx                 rts
 * GfxExit - the display mode as it was, then the bitmaps allocated here
 *   freed (SS.FScrn).
 ********************************************************************
-GfxExit
+GfxExit             tst       GFXON,u             never set up (tsnd): nothing to undo
+                    beq       gex
                     ifne      HIRES
                     ldy       #0
                     bsr       BmLo
@@ -157,7 +159,7 @@ ge2                 incb
                     clra
                     ldb       #SS.MCR
                     os9       I$SetStt
-                    rts
+gex                 rts
 
 ********************************************************************
 * AllocBm - B = bitmap #: SS.AScrn 320x240 (one that exists already is

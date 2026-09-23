@@ -439,7 +439,9 @@ this project:
   for sound effects that can be expressed as notes.
 - **OPL3 (YMF262)** at `$C4:$0180-$0183` — FM synthesis, **write-only, no status or IRQ**, so the driver
   must keep its own shadow of every register and respect the chip's write timing itself.
-- **SID ×3** at `$C4:$0000` / `$0080` / `$0100` (left / mono / right) — soft SIDs in the FPGA. Best where a
+- **SID ×2** at `$C4:$0000` (left) and `$0100` (right); `$0080` ("mono") is not a third chip but writes
+  both at once (`SID_OPL3_Interface.v`: two `sid6581` instances, `wren` = left|mono and right|mono), so six
+  voices in all — soft SIDs in the FPGA. Best where a
   sound is a waveform-and-envelope description rather than a recording.
 - **PSG ×3** at `$C4:$0200-$0217` — square waves and noise, the cheapest of the lot, and a close match for
   arcade hardware of that generation.

@@ -55,6 +55,26 @@ TXCLH               rmb       1                   text.a: TXCLR << 4, the left d
 TXNR                rmb       1                   text.a: rows left
 FLSHN               rmb       1                   AvgFlush: tries left while the FIFO is full
 
+* sound (sound.a): the SIDs' six voices and the POKEYs' eight channels
+SNDVCH              rmb       6                   a voice's channel ($FF: free); SNDCHV must follow
+SNDCHV              rmb       8                   a channel's voice ($FF: none)
+SNDVC               rmb       6                   a voice's control register as written; SNDVS, SNDVF follow
+SNDVS               rmb       6                   its sustain/release register as written
+SNDVF               rmb       12                  its frequency as written (high, low)
+SNDUP               rmb       1                   non-zero: SndInit ran (SndExit silences)
+SNDBAS              rmb       2                   SndOut: the left SID's logical address
+SNDCH               rmb       1                   SndOut: the channel
+SNDV                rmb       1                   SndOut: its voice
+SNDSR               rmb       1                   SndOut: the sustain/release wanted
+SNDF                rmb       2                   SndOut: the frequency wanted
+SNDCT               rmb       1                   SndOut: the control register wanted
+TSMODE              rmb       1                   the first character of the parameters ('s': tsnd)
+TSRUN               rmb       1                   tsnd: the sequence is playing
+TSSEQ               rmb       1                   tsnd: its next step (offset in TsSeq)
+TSTIM               rmb       1                   tsnd: ticks left in this step
+TSKEY               rmb       1                   tsnd: the key read
+GFXON               rmb       1                   non-zero: GfxInit ran (GfxExit undoes it)
+
 * the frame loop
 WORK                rmb       2                   this pass's budget left, estimated microseconds (Spend)
 DRAWNG              rmb       1                   non-zero: a frame's drawing is under way
