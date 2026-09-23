@@ -235,6 +235,10 @@ fan twice in a row fills **most** of them in: each pass drops a different random
 the timing hypothesis predicts, and it rules out a pixel the engine never generates. Drawing twice is a
 workaround for testing, not for the game: it doubles the cost and still leaves holes.
 
+**Status: with the FPGA developer (2026-09-22).** The user's call: assume a fixed core arrives soon and
+carry on; the port does not design around the holes. Re-run bmtest `C` + `L` and `C` + `F` on every new
+core until the fan is solid.
+
 What else nobody has measured, and what the plan's first hardware stage measures:
 
 | Number | Why it decides something | Estimate, unchecked |
