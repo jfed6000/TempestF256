@@ -392,11 +392,15 @@ class PortAVG:
     in batches of up to 255, SS.BmLine's limit); texts are (glyph | $80 if big, clut, col, row),
     clut = colour*16 + the glyph's own intensity, at most MAXTXT.  A list ends at HALT or JMPL 0
     (stats "ended" = 1) or after MAXJUMPS control transfers (JSRL run, RTSL, JMPL; a runaway list).
+    A zero vector (a dot where the beam is) in the colour of the last record sent, on that
+    record's end, is not sent: it would repaint the pixel that record has just painted (stats
+    "dots").  Nearly all are tiny pictures deep in the tube, whose moves round to no move.
     Counters are left in self.stats.  Not specified: a list that runs off the end of vector RAM or
     ROM without a jump (the 6809 walks on into whatever follows)."""
 
     MAXJUMPS = 1024
     MAXTXT = 256
+    DROPDOTS = True            # False: every record (for --compare against the float pipeline)
 
     def __init__(self, rom, glyphs=True):
         self.rom = rom
@@ -417,7 +421,7 @@ class PortAVG:
         col, row = 160 << 8, 120 << 8
         recs, texts = [], []
         st = {"instructions": 0, "vectors": 0, "glyphs": 0, "clipped": 0, "dropped": 0, "full": 0,
-              "ended": 0, "centred": 0, "statint": 0}
+              "ended": 0, "centred": 0, "statint": 0, "dots": 0}
         self.trace = []
         jumps = self.MAXJUMPS
         while jumps:
@@ -442,14 +446,20 @@ class PortAVG:
                 row = wrap(row - (-dy if ey < 0 else dy), 24)
                 inten = intensity if z == 1 else z << 1
                 st["statint"] += z == 1
-                if inten:
+                clut = ((color & 0xF) << 4) | inten
+                if not inten:
+                    pass
+                elif (self.DROPDOTS and ex == 0 and ey == 0 and recs and recs[-1][4] == clut and
+                        recs[-1][2:4] == (c0, r0)):
+                    st["dots"] += 1           # the last record's end again, in its colour
+                else:
                     c = clip_int(c0, r0, pix(col), pix(row))
                     if c is None:
                         st["dropped"] += 1
                     else:
                         if c != (c0, r0, pix(col), pix(row)):
                             st["clipped"] += 1
-                        recs.append(c + (((color & 0xF) << 4) | inten,))
+                        recs.append(c + (clut,))
             elif op == 1:
                 st["ended"] = 1
                 break
@@ -718,6 +728,7 @@ def compare(captures, first):
             if item[0] == "rom":
                 rom = item[1]
                 port = PortAVG(rom, glyphs=False)
+                port.DROPDOTS = False
                 continue
             _, n, vram, cram = item
             if n < first:

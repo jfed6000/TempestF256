@@ -149,15 +149,22 @@ def word(w):
 
 
 def random_list(rng, rom):
-    """A random display list at vector RAM 0, with a subroutine at $400 (words), ending JMPL 0."""
+    """A random display list at vector RAM 0, with a subroutine at $400 (words), ending JMPL 0.
+    Half the lists are dot-heavy: zero vectors, two colours, and jumps that leave the beam just
+    off an edge of the bitmap (the redundant-dot rule and the clip meeting)."""
     chars = [av.vg_word(bytes(4096) + rom, av.VGMSGA_W + i) & 0x1FFF for i in range(av.NGLYPHS)]
+    dots = rng.random() < 0.5
 
     def comp():
         k = rng.random()
+        if dots and k < 0.45:
+            return 0
         if k < 0.15:
             return rng.choice((0, 0x1FFF, 1, 0x1FFE))              # 0, -1, 1, -2
         if k < 0.3:
             return rng.randrange(0x2000)                          # anything, n < 3 included
+        if dots and k < 0.4:
+            return rng.randrange(-900, 900) & 0x1FFF              # to an edge and past it
         return rng.randrange(-600, 600) & 0x1FFF
 
     def body(n, sub):
@@ -165,7 +172,8 @@ def random_list(rng, rom):
         for _ in range(n):
             k = rng.random()
             if k < 0.35:
-                out += word(comp()) + word((rng.randrange(8) << 13) | comp())            # VCTR
+                z = rng.choice((0, 1, 6, 6)) if dots else rng.randrange(8)
+                out += word(comp()) + word((z << 13) | comp())                          # VCTR
             elif k < 0.5:
                 out += word(0x4000 | rng.randrange(0x2000))                             # SVEC
             elif k < 0.6:
@@ -173,9 +181,17 @@ def random_list(rng, rom):
                 lin = rng.choice((0, 0, rng.randrange(256)))
                 out += word(0x7000 | (bs << 8) | lin)                                   # SCAL
             elif k < 0.68:
-                out += word(0x6000 | rng.randrange(0x1000))                             # STAT
+                if dots:
+                    out += word(0x6800 | rng.choice((3, 5)))                            # colour
+                else:
+                    out += word(0x6000 | rng.randrange(0x1000))                         # STAT
             elif k < 0.72:
                 out += word(0x8040)                                                     # CNTR
+            elif dots and k < 0.78:
+                d = rng.randrange(200, 1200)                  # out through the top or bottom and
+                d = (d if rng.random() < 0.5 else -d) & 0x1FFF  # back: a dot off, a dot back on
+                out += (word(d) + word(0) + word(0) + word(6 << 13) +
+                        word(-av.sext(d, 13) & 0x1FFF) + word(0) + word(0) + word(6 << 13))
             elif k < 0.85:
                 out += word(0xA000 | rng.choice(chars))                                 # a character
             elif k < 0.9 and not sub:

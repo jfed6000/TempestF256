@@ -24,22 +24,22 @@ INTERPRETER ON THE HOST ARE DONE, all host only. The interpreter is FOR REVIEW (
   - Its specification is tools/avgview.py's PortAVG (integer; the float pipeline stays as stage 0's
     reference to MAME). tools/avgtest.py runs it on the host 6809: every captured frame and 20,000
     random lists byte-exact, coprocessor and software multiply.
-  - 17.4 ms a play frame at 8 MHz (median; 22.7 ms 95%): with the game's 7.5 ms and the driver's
-    ~6 ms it fits the median frame with little room. The budget is the main review point.
-  - Proposed, not done: dropping redundant dot records; using the D8 coprocessor's multiplier
-    (built that way, software behind AVGSWM) needs your approval.
+  - 16.9 ms a play frame at 8 MHz (median; 22.1 ms 95%): with the game's 7.5 ms and the driver's
+    ~4-5 ms it fits the median frame with little room. The budget is still open.
+  - Decided 2026-09-23: redundant dot records dropped (a zero vector on the last record's end, in
+    its colour); the D8 coprocessor's multiplier approved (software behind AVGSWM).
 
 DECIDED: Rev 3; D3 glyph masks on a front text bitmap; D4 keyboard (arrows, Shift fire, z zapper) +
 mouse (SS.MsDelta, approved) + joystick, no spinner; D6 model B and its conventions; D8 math
-coprocessor approved; hand-finished code in src/ (xlat/ generated, never edited); the D6 hand
+coprocessor approved, its multiplier too; hand-finished code in src/ (xlat/ generated, never edited); the D6 hand
 work's recommendations (ZATC4V, MBDV24, data area to $B9D). The rest of the plan's recommendations
 stand unless I say otherwise.
 
 HARDWARE: the rc16 line engine DROPS PIXELS (gaps that move run to run; K2, two cores). The FPGA
 developer is on it and we ASSUME A FIX. Re-run bmtest C then L, and C then F, on each new core.
 
-THIS SESSION: first my answers to docs/status.md "Stage 2 on the host", "For review" (the CPU
-budget and what to do about it; the coprocessor multiplier; the layout), and whether to commit.
+THIS SESSION: first my answers to docs/status.md "Stage 2 on the host", "Decided ..., and what is
+left" (the CPU budget; the layout), and whether to commit.
 Then, unless I choose otherwise: the platform layer (the hardware seams, the IRQ as the frame loop,
 the module header, "make pic"), proposing its SS calls before any SS call code. Update
 docs/status.md as pieces land; stop and report at the end.

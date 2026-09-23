@@ -276,7 +276,9 @@ absolute-address exception, beside the VS1053. It is the Math Box's one divide i
 against 300-400 cycles in software, twice a projected point. Two conditions: `tools/piccheck` learns the
 range; and the divide runs with interrupts masked for its few instructions, because the unit is global
 and **`fm` already uses `$FEE0`** — another program on another terminal can interleave. A software
-divide stays in the source behind a build flag, for comparison and in case you say no.
+divide stays in the source behind a build flag, for comparison and in case you say no. *The unit's
+16×16 multiplier approved too (user, 2026-09-23), for the AVG interpreter's moves, on the same
+terms; the software multiply stays behind `AVGSWM`.*
 
 **D9. Erase and flip order (after stage 1).** Two shapes:
 

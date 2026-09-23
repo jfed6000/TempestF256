@@ -75,6 +75,9 @@ AV.PR	equ	100			4: muldiv's product, then the dividend
 AV.SAVY	equ	104			2: Y around the clip
 AV.LSCL	equ	106			2: the last SCAL word (as LDD reads it); 0: none
 AV.CLON	equ	108			non-zero when bs >= 4 (the VCTR clamp is possible)
+AV.LEX	equ	109			2: the last record sent: its end's column
+AV.LEY	equ	111			its end's row
+AV.LCL	equ	112			its CLUT index (0: none yet; a record's is never 0)
 
 * AvgRun - interpret the display list in window A once.
 * In: U = the data area (VWIN set; page-aligned).  Out: AVGPG+AV.TCNT texts at window A + $1800,
@@ -131,6 +134,7 @@ AvgRun	pshs	u,dp
 	sta	<AV.BS
 	sta	<AV.SCL
 	std	<AV.LSCL
+	sta	<AV.LCL
 	ldd	#MAXJMP
 	std	<AV.JMP
 	lda	#RBATCH
@@ -249,16 +253,20 @@ _AT1	lda	<AV.BS
 	leax	AvBitl,pcr
 	suba	b,x
 	suba	#3
-	bsr	AvShl
+	lbsr	AvShl
 	bra	_Av3
 
-AvMv	bsr	AvMove
+AvMv	lbsr	AvMove
 	lbra	AvLoop
 
 * AvDraw: B = the CLUT index.  The line from the beam to where the vector leaves it: a record,
 * clipped if an end is off the bitmap.
 AvDraw	stb	<AV.CLUT
-	ldx	<AV.RPTR
+	ldd	<AV.VX
+	bne	_DV
+	ldd	<AV.VY
+	beq	_DZ			a zero vector: a dot where the beam is
+_DV	ldx	<AV.RPTR
 	ldd	<AV.COL			the start
 	std	<AV.LC
 	cmpd	#BMW-1
@@ -278,7 +286,11 @@ AvDraw	stb	<AV.CLUT
 	cmpd	#BMH-1
 	bhi	_DC
 	stb	5,x
-_D1	lda	<AV.CLUT
+	stb	<AV.LEY
+	ldd	2,x			(only now: a line that goes to the clip may not be sent)
+	std	<AV.LEX
+_D1	lda	<AV.CLUT		the last record sent (LEX, LEY set before)
+	sta	<AV.LCL
 	clrb
 	std	6,x
 	leax	8,x
@@ -297,9 +309,39 @@ _DC	lbsr	AvClip			carry set: nothing left
 	std	,x
 	ldd	<AV.P1
 	std	2,x
+	std	<AV.LEX
 	lda	<AV.P0+3
 	ldb	<AV.P1+3
 	std	4,x
+	stb	<AV.LEY
+	bra	_D1
+* A zero vector: a dot where the beam is.  On the last record's end, in its colour, it repaints
+* that pixel: not sent.  Otherwise a one-pixel record, or nothing off the bitmap.
+_DZ	ldd	<AV.COL
+	cmpd	<AV.LEX
+	bne	_DZ1
+	ldd	<AV.ROW
+	cmpb	<AV.LEY
+	bne	_DZ1
+	tsta
+	bne	_DZ1
+	lda	<AV.CLUT
+	cmpa	<AV.LCL
+	lbeq	AvLoop
+_DZ1	ldd	<AV.ROW
+	cmpd	#BMH-1
+	lbhi	AvLoop			off the bitmap: nothing (as the clip)
+	ldd	<AV.COL
+	cmpd	#BMW-1
+	lbhi	AvLoop
+	ldx	<AV.RPTR
+	std	,x
+	std	2,x
+	std	<AV.LEX
+	ldb	<AV.ROW+1
+	stb	4,x
+	stb	5,x
+	stb	<AV.LEY
 	bra	_D1
 
 * AvShl - shift AV.VX and AV.VY left A times (A > 0).
