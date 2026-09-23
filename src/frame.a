@@ -32,8 +32,15 @@ BUDLOG              equ       0                   what a logic pass leaves for t
 *                                                 the logic itself runs 9.7 to 12.6 ms (osrun.py)
 * what a step costs, for Spend (estimated: the interpreter ~105 us a record on the host 6809, the
 * driver 474 us a call and 27.5 a record by the count of its instructions; tline S will say)
+                    ifndef    HIRES
+HIRES               equ       1                   the line bitmaps 640x240 (gfx.a; branch hires640)
+                    endc
                     ifndef    RECUS
+                    ifne      HIRES
+RECUS               equ       170                 a record, interpreted, made 640 (~9 us) and drawn
+                    else
 RECUS               equ       160                 a record, interpreted and drawn (more than 128: gfx.a NxtBat)
+                    endc
                     endc
 RECK                equ       32768/RECUS         NxtBat's multiplier: records = (D / 128) * RECK / 256
 CALLUS              equ       474                 an SS.BmLine call

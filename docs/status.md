@@ -1043,6 +1043,26 @@ What was expected: about **60 passes and 13-14 game frames a second**: the hardw
   entries. Horizontal runs double in pixels, so a frame's pixels rise by perhaps half, each one an
   RMW: `tline S` (or the sign-off's numbers) on a HIRES4 plane decides whether it is affordable.
 
+### The 640×240 test (branch `hires640`, 2026-09-23) — untested on hardware
+
+User: "let's create a 640 test branch and test 640 and see if it looks better." Built:
+
+- **grfdrv256** (`wb/multiterm`, committed locally, not pushed): `SS.BmLine` reads the target
+  plane's HIRES4 bit and allows X to 639 (`LD.MaxX4`) with a 640-pixel FIFO margin
+  (`LD.Room4`); a 320 plane is unchanged. On `l2_wildbitsk2.dsk` and the Jr2 image (targeted
+  copies, compared).
+- **The port** (`HIRES` = 1 in `frame.a`, 0 gives the main build): bitmaps 0 and 1 set by
+  `SS.BmCfg` to HIRES4, CLUT 1, group 0 (back to 320 and CLUT 0 on exit); `AvgFlush` converts each
+  batch once before `SS.BmLine`, X doubled and the colour byte to nibble colour + 1 (colour 15
+  shares 15); `ClutCommit` also writes CLUT 1's entries 1-15, each colour at intensity 12
+  (`HIINT`). The interpreter still works in 320, so endpoints land on even 640 columns while the
+  lines between are drawn at 640; `avgtest.py` is unaffected. `RECUS` 170 covers the conversion.
+- `osrun.py` models `SS.BmCfg`, 4-bit planes, CLUT 1 and 640 pictures: 30 s, **0 ticks lost, 14.2
+  game frames a second, every check right**. The Wildbits MAME: starts, `5`, `1`, rating screen,
+  `q` exits (no line engine there).
+- Unknown until the K2: the engine's speed on a 4-bit plane (each pixel a read-modify-write), and
+  whether intensity 12 for everything looks right.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

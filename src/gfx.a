@@ -15,6 +15,13 @@
 ********************************************************************
 
 BMNBLK              equ       10                  blocks in a 320x240 bitmap
+* HIRES (branch hires640): the line bitmaps 0 and 1 are 640x240 at 4 bits
+*   a dot (SS.BmCfg HIRES4, the rc17 core), on CLUT 1: a record's X is
+*   doubled and its colour becomes nibble colour+1 (colour 15 shares 15),
+*   CLUT 1's entry n colour n-1 at intensity HIINT.  The interpreter still
+*   works in 320 (AvgFlush converts each batch); the text stays 320.
+HIINT               equ       12                  the intensity the 16 colours show at
+*   (HIRES itself is set in frame.a, whose budgets depend on it)
 
 ********************************************************************
 * GfxInit - bitmaps 0-2, cleared; the CLUT; the layers; the display on.
@@ -58,6 +65,14 @@ gi2                 lda       ,x+
                     ldy       #4
                     bsr       Layer
                     bcs       gix
+                    ifne      HIRES
+                    ldy       #0                  the line bitmaps: 640x240, CLUT 1, group 0
+                    bsr       BmHi
+                    bcs       gix
+                    ldy       #1
+                    bsr       BmHi
+                    bcs       gix
+                    endc
                     ldx       #FX_GRF+FX_BM       console text off, bitmaps only (the MCR's low byte)
                     ldy       #0                  320x240, 60 Hz
                     clra                          path 0
@@ -65,6 +80,22 @@ gi2                 lda       ,x+
                     os9       I$SetStt
 gix                 rts
 
+                    ifne      HIRES
+* BmHi - Y = bitmap #: SS.BmCfg HIRES4 on, CLUT 1, group 0, the enable
+*   left alone.  BmLo - back to 320x240 and CLUT 0 (on exit).  U kept;
+*   carry = error.
+BmHi                ldx       #$FF01
+                    pshs      u
+                    ldu       #$0100
+                    bra       bmcf
+BmLo                ldx       #$FF00
+                    pshs      u
+                    ldu       #$0000
+bmcf                clra                          path 0
+                    ldb       #SS.BmCfg
+                    os9       I$SetStt
+                    puls      u,pc
+                    endc
 * Layer - X = layer, Y = source (0-2 bitmap, 4-6 tile map).  Carry = error.
 Layer               clra                          path 0
                     ldb       #SS.Layer
@@ -92,7 +123,14 @@ flx                 rts
 * GfxExit - the display mode as it was, then the bitmaps allocated here
 *   freed (SS.FScrn).
 ********************************************************************
-GfxExit             lda       BMOWN,u
+GfxExit
+                    ifne      HIRES
+                    ldy       #0
+                    bsr       BmLo
+                    ldy       #1
+                    bsr       BmLo
+                    endc
+                    lda       BMOWN,u
                     ldb       #0
 ge1                 lsra
                     bcc       ge2
@@ -247,7 +285,35 @@ bwx                 rts
 *   Each call is charged to the pass's budget (frame.a Spend), which may
 *   hand the tick back to the loop between calls.
 ********************************************************************
-AvgFlush            lda       #20
+AvgFlush
+                    ifne      HIRES
+                    pshs      b,x                 the batch into 640 and nibbles, once
+                    pshs      b
+hx1                 ldd       ,x
+                    lslb
+                    rola
+                    std       ,x
+                    ldd       2,x
+                    lslb
+                    rola
+                    std       2,x
+                    ldb       6,x                 colour << 4 | intensity
+                    lsrb
+                    lsrb
+                    lsrb
+                    lsrb
+                    incb
+                    cmpb      #16
+                    blo       hx2
+                    ldb       #15
+hx2                 stb       6,x
+                    leax      8,x
+                    dec       ,s
+                    bne       hx1
+                    leas      1,s
+                    puls      b,x
+                    endc
+                    lda       #20
                     sta       FLSHN,u
 af1                 pshs      b,x                 ,s = records left, 1,s = the next
                     lda       SHOWN,u
@@ -369,7 +435,43 @@ cc6                 puls      a,b                 A = the last, B = the first
                     os9       I$SetStt
                     puls      u
                     leas      1,s
-                    rts
+                    ifne      HIRES
+                    bcs       ccx
+* CLUT 1 for the 640 line bitmaps: entry n = colour n-1 at HIINT, 1-15
+                    leay      CLUTBF,u
+                    clrb
+cc7                 leax      CLSENT,u
+                    lda       b,x
+                    pshs      b
+                    ldb       #HIINT
+                    bsr       Colour1
+                    puls      b
+                    incb
+                    cmpb      #15
+                    blo       cc7
+                    pshs      u
+                    leax      CLUTBF,u
+                    ldy       #$0101              CLUT 1, entry 1
+                    ldu       #15
+                    clra                          path 0
+                    ldb       #SS.ClutWrite
+                    os9       I$SetStt
+                    puls      u
+                    endc
+ccx                 rts
+
+                    ifne      HIRES
+* Colour1 - A = a colour RAM byte, B = an intensity: its entry, B, G, R, A,
+*   at Y (advanced).  X kept.
+Colour1             pshs      b,x
+                    leax      ClutLv,pcr
+                    coma
+                    pshs      a
+                    pshs      b                   ,s = the intensity, 1,s the colour
+                    bsr       c16one
+                    leas      2,s
+                    puls      b,x,pc
+                    endc
 
 * Colour16 - A = a colour RAM byte: its 16 entries (intensity 0-15), B, G, R, A, at Y (advanced).
 *   B, X kept.
@@ -379,29 +481,32 @@ Colour16            pshs      b,x
                     pshs      a                   ,s = the colour, active high
                     clrb
 c16a                pshs      b                   ,s = the intensity, 1,s the colour
-                    lda       1,s                 blue: bit 2, level 0 or $F3
-                    anda      #$04
-                    lsla                          $08: row 2 ($F3) when set
-                    bsr       c16lv
-                    lda       1,s                 green: bit 3
-                    anda      #$08
-                    bsr       c16lv
-                    lda       1,s                 red: bits 1-0, rows 0-3 ($00, $0C, $F3, $FF)
-                    anda      #$03
-                    lsla
-                    lsla
-                    bsr       c16lv
-                    clr       ,y+                 alpha
+                    bsr       c16one
                     puls      b
                     incb
                     cmpb      #16
                     blo       c16a
                     leas      1,s
                     puls      b,x,pc
-* c16lv - A = a level row * 4; ,s+2 = the intensity (past the return): the level at Y+.  X kept.
+* c16one - 2,s = the intensity, 3,s = the colour (past the return): one entry at Y+.  X kept.
+c16one              lda       3,s                 blue: bit 2, level 0 or $F3
+                    anda      #$04
+                    lsla                          $08: row 2 ($F3) when set
+                    bsr       c16lv
+                    lda       3,s                 green: bit 3
+                    anda      #$08
+                    bsr       c16lv
+                    lda       3,s                 red: bits 1-0, rows 0-3 ($00, $0C, $F3, $FF)
+                    anda      #$03
+                    lsla
+                    lsla
+                    bsr       c16lv
+                    clr       ,y+                 alpha
+                    rts
+* c16lv - A = a level row * 4; ,s+4 = the intensity (past two returns): the level at Y+.  X kept.
 c16lv               lsla
                     lsla                          row * 16
-                    adda      2,s                 + intensity
+                    adda      4,s                 + intensity
                     lda       a,x
                     sta       ,y+
                     rts
