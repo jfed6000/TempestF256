@@ -1163,6 +1163,23 @@ check). Found on the way: the first table held three 6-8-stroke pieces the logo 
 build, and then the budget estimates (`RECUS` a record) the split frame charges, which the faster
 records would let come down.
 
+## BmWait removed (2026-09-23, host only) — untested on hardware
+
+The drawing's first step asked `GetStat SS.BmClear` whether the clear `GamLog` armed had run: one
+grfdrv call a game frame (~450 µs at Joust's K2 figures), and in the model it never once found the
+fill busy. It cannot: `BUDLOG` = 0 puts the drawing in a later tick than the arming, the fill
+starts at that tick's vertical blank at the latest, and the DMA halts the CPU until it is done. So
+the call went, with its bounded retry and `NODMA` fallback (a fill that fails to *arm* still falls
+back to the CPU clear); `frame.a` refuses to assemble with `BUDLOG` other than 0. What would show
+if the argument were wrong: old lines left in the picture, not a hang. `osrun.py` 60 s (with
+`AVCOLL`): **14.6 game frames a second** (14.5), 5 ticks lost in 3,600 (13), no line drawn before its
+clear, every check right. Module 37,614 bytes. The calls a game frame now makes (`osrun.py`):
+`SS.LiveKeys` and `SS.Joy` 4 each (one a pass), `SS.BmLine` 2.4, `SS.BmClear` 1, `SS.Layer` (the
+flip) 1, `SS.ClutWrite` 0.5.
+
+Also: the program's `SS.DScrn` is now spelled **`SS.MCR`** (`wildbits.d`'s name for the same code;
+`SS.Layer` was already used for `$8E`), and `osrun.py` uses both new names. Module byte-identical.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

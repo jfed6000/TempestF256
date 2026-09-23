@@ -79,7 +79,7 @@ gi2                 lda       ,x+
                     ldx       #FX_GRF+FX_BM       console text off, bitmaps only (the MCR's low byte)
                     ldy       #0                  320x240, 60 Hz
                     clra                          path 0
-                    ldb       #SS.DScrn
+                    ldb       #SS.MCR
                     os9       I$SetStt
 gix                 rts
 
@@ -155,7 +155,7 @@ ge2                 incb
                     ldb       MCRHI,u
                     tfr       d,y
                     clra
-                    ldb       #SS.DScrn
+                    ldb       #SS.MCR
                     os9       I$SetStt
                     rts
 
@@ -215,7 +215,7 @@ BmClr               ldb       #DmaWt.Poll<<DmaWt.Shift+1 poll until done, 16-bit
 *   (the DMA engine's WAIT_2_TRF), with the CPU halted while it runs.
 *   Mode 7 spent the rest of the frame waiting for that blank: a tick
 *   lost every game frame on the K2 (docs/status.md, "Optimising").
-*   Nothing may draw into the bitmap before BmWait says it is done.
+*   Nothing may draw into the bitmap before the next tick (GamLog).
 BmArm               ldb       #DmaWt.None<<DmaWt.Shift+1 arm and return, 16-bit
 bcgo                tst       NODMA,u
                     bne       BmClrCPU
@@ -255,30 +255,6 @@ bcok                clrb
                     rts
 bcerr               leas      2,s
                     rts
-
-* BmWait - until the fill BmArm armed has run (GetStat SS.BmClear, R$X
-*   = 0 idle).  It has, by the next tick, so this normally asks once.
-*   Bounded: a fill that never ends latches NODMA and the CPU clears the
-*   hidden bitmap instead.  U kept (the call returns R$Y and R$U too,
-*   a diagnostic); A, B, X, Y clobbered.
-BmWait              tst       NODMA,u
-                    bne       bwx
-                    ldy       #2000
-bw1                 pshs      y,u
-                    clra                          path 0
-                    ldb       #SS.BmClear
-                    os9       I$GetStt            (R$Y and R$U return the DMA's destination)
-                    puls      y,u
-                    bcs       bwbad
-                    cmpx      #0
-                    beq       bwx
-                    leay      -1,y
-                    bne       bw1
-bwbad               inc       NODMA,u
-                    lda       SHOWN,u
-                    eora      #1
-                    lbra      BmClrCPU
-bwx                 rts
 
 ********************************************************************
 * AvgFlush - the interpreter's batch (avg.a): X = the records, B = the

@@ -30,6 +30,9 @@ BUDPAS              equ       12500               a drawing pass: the tick less 
                     endc
 BUDLOG              equ       0                   what a logic pass leaves for the drawing: nothing, since
 *                                                 the logic itself runs 9.7 to 12.6 ms (osrun.py)
+                    ifne      BUDLOG
+                    error     "BUDLOG must be 0: the drawing assumes a later tick, the clear done (GamLog)"
+                    endc
 * what a step costs, for Spend (estimated: the interpreter ~105 us a record on the host 6809, the
 * driver 474 us a call and 27.5 a record by the count of its instructions; tline S will say)
                     ifndef    HIRES
@@ -92,9 +95,10 @@ ml3                 lbsr      DrwRes
 ********************************************************************
 * GamLog - a game frame's logic: MAINLN's three calls.  The hidden line
 *   bitmap's clear is armed first (BmArm): the DMA engine runs it in
-*   the next vertical blank, before the drawing's first pass, which
-*   checks (Draw, BmWait).  Waiting for it here cost the rest of the
-*   tick (docs/port-plan.md D9: double buffer).
+*   the next vertical blank, with the CPU halted until it is done, so
+*   the drawing, which BUDLOG = 0 puts in a later tick, finds it clear
+*   without asking (BmWait's GetStat went, docs/status.md).  Waiting
+*   for it here cost the rest of the tick (docs/port-plan.md D9).
 ********************************************************************
 GamLog              clr       <FRTIMR             ALEXEC:53 LDA I,0 / STA FRTIMR
                     lda       SHOWN,u
@@ -149,8 +153,7 @@ sp1                 puls      cc,a,b,dp,x,y,u,pc
 *   text, which are single-buffered
 Draw                ldd       #0                  room for the first batch?
                     ldx       #MINBUS
-                    bsr       Spend
-                    lbsr      BmWait              the clear GamLog armed has run
+                    bsr       Spend               (a later tick: the clear GamLog armed has run)
                     lbsr      NxtBat              its size, from the budget
                     lbsr      AvgRun              records to AvgFlush (gfx.a), which Spends
                     ldd       #0                  room for the flip and the CLUT?

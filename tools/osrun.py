@@ -46,7 +46,7 @@ W, H = 320, 240
 F_EXIT, F_ICPT, F_SLEEP, F_TIME = 0x06, 0x09, 0x0A, 0x15
 F_ALLRAM, F_MAPBLK, F_CLRBLK, F_DELRAM = 0x39, 0x4F, 0x50, 0x51
 I_WRITE, I_GETSTT, I_SETSTT = 0x8A, 0x8D, 0x8E
-SS_OPT, SS_JOY, SS_ASCRN, SS_DSCRN, SS_FSCRN, SS_PSCRN = 0x00, 0x13, 0x8B, 0x8C, 0x8D, 0x8E
+SS_OPT, SS_JOY, SS_ASCRN, SS_MCR, SS_FSCRN, SS_LAYER = 0x00, 0x13, 0x8B, 0x8C, 0x8D, 0x8E
 SS_LIVEKEYS, SS_CLUTWRITE, SS_MSDELTA = 0xC6, 0xCF, 0xD0
 SS_WSIG, SS_BMBLK, SS_BMCLEAR, SS_BMLINE, SS_BMCFG = 0xE1, 0xE4, 0xE5, 0xE7, 0xED
 E_UNKSVC, E_ILLARG, E_DEVBSY = 208, 187, 250
@@ -248,7 +248,7 @@ class Host(CPU6809):
         self.cost(150)
         if code == SS_OPT:
             return 0
-        if code == SS_DSCRN:
+        if code == SS_MCR:
             if get:
                 self.x, self.y = 0x0001, 0x00FF
             else:
@@ -307,7 +307,7 @@ class Host(CPU6809):
                 self.sync_in(self.bm[n] + i)
             self.cost(400)
             return 0
-        if code == SS_PSCRN and not get:
+        if code == SS_LAYER and not get:
             self.layers[self.x] = self.y
             if self.x == 1:
                 self.flipped()

@@ -24,7 +24,7 @@ st1                 clr       ,x+
                     lda       #FX_OMIT
                     sta       MCRHI,u
                     clra                          path 0
-                    ldb       #SS.DScrn
+                    ldb       #SS.MCR
                     os9       I$GetStt
                     lbcs      Quit
                     tfr       x,d
