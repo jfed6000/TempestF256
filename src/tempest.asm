@@ -47,7 +47,11 @@ ModBeg              mod       eom,name,tylg,atrv,start,size the module's first b
 
                     include   data.a
 
+                    ifdef     MODNB
+name                fcs       /tempnb/            (the no-split trial: make EXTRA="-DMODNB -DBUDPAS=30000")
+                    else
 name                fcs       /tempest/
+                    endc
                     fcb       edition
 
 * the platform layer

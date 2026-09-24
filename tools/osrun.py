@@ -46,6 +46,9 @@ W, H = 320, 240
 F_EXIT, F_ICPT, F_SLEEP, F_TIME = 0x06, 0x09, 0x0A, 0x15
 F_ALLRAM, F_MAPBLK, F_CLRBLK, F_DELRAM = 0x39, 0x4F, 0x50, 0x51
 I_WRITE, I_GETSTT, I_SETSTT = 0x8A, 0x8D, 0x8E
+I_OPEN, I_CLOSE = 0x84, 0x8F
+SS_SOLIRQ, SS_SOLMUTE = 0xC3, 0xC4                 # SOLdrv (/fSOL): a signal at a line of every frame
+SOLPATH, SIGCOST = 5, 150                          # its path here; a signal delivered, guessed (us)
 SS_OPT, SS_JOY, SS_ASCRN, SS_MCR, SS_FSCRN, SS_LAYER = 0x00, 0x13, 0x8B, 0x8C, 0x8D, 0x8E
 SS_LIVEKEYS, SS_CLUTWRITE, SS_MSDELTA = 0xC6, 0xCF, 0xD0
 SS_WSIG, SS_BMBLK, SS_BMCLEAR, SS_BMLINE, SS_BMCFG = 0xE1, 0xE4, 0xE5, 0xE7, 0xED
@@ -103,6 +106,8 @@ class Host(CPU6809):
         self.pass_logic, self.pass_rec, self.pass_gly, self.pass_logcyc = False, 0, 0, 0
         self.cp = bytearray(32)             # the integer coprocessor (D8), as JR_Math_Block.v
         self.map_io(0xFEE0, 0xFEFF, self.cp_read, self.cp_write)
+        self.sol = None                     # SOLdrv: {"sig", "muted"} while /fSOL is open
+        self.sol_tick = 0                   # the last tick its signal was delivered for
         self.mmuctl = 0                     # $FFA0: the active LUT (bits 1-0), the edited one (5-4)
         self.map_io(0xFFA0, 0xFFAF, self.mmu_read, self.mmu_write)
 
@@ -229,15 +234,43 @@ class Host(CPU6809):
             return
         super().step()
 
+    def sol_deliver(self):
+        """SOLdrv's line-0 signal, one a tick, taken at the next os9 call (as a signal is, when the
+        process next enters the kernel): the module's Icpt counts TICKS"""
+        so = self.sol
+        if not so or not so["sig"]:
+            self.sol_tick = self.tick
+            return
+        while self.sol_tick < self.tick:
+            self.sol_tick += 1
+            if not so["muted"] and "TICKS" in self.sym:
+                a = DATA + self.sym["TICKS"]
+                t = (self.mem[a] << 8 | self.mem[a + 1]) + 1
+                self.mem[a], self.mem[a + 1] = (t >> 8) & 0xFF, t & 0xFF
+                self.cost(SIGCOST)
+
     def os9(self, fn):
+        self.sol_deliver()
         if fn == F_EXIT:
             raise Exit(self.b)
         if fn == F_ICPT:
             return 0
         if fn == F_SLEEP:
             n = self.x
-            if n == 0:
-                raise Exit("F$Sleep 0: asleep for ever")
+            if n == 0:                      # until a signal: SOLdrv's, at the next tick
+                if not (self.sol and self.sol["sig"] and not self.sol["muted"]):
+                    raise Exit("F$Sleep 0: asleep for ever")
+                if self.woke is not None:
+                    self.passes.append(self.cycles - self.woke)
+                    self.pass_info.append((self.cycles - self.woke, self.pass_logic, self.records - self.pass_rec,
+                                           self.pass_gly, self.pass_logcyc))
+                    self.pass_logic, self.pass_rec, self.pass_gly, self.pass_logcyc = False, self.records, 0, 0
+                    self.lost += self.tick - self.woke_tick
+                self.cycles = (self.tick + 1) * TICK
+                self.dma_halt()
+                self.sol_deliver()
+                self.woke, self.woke_tick = self.cycles, self.tick
+                return 0
             if n == 2 and self.woke is not None:    # a pass of the frame loop ends
                 self.passes.append(self.cycles - self.woke)
                 self.pass_info.append((self.cycles - self.woke, self.pass_logic, self.records - self.pass_rec,
@@ -290,7 +323,31 @@ class Host(CPU6809):
             self.output = getattr(self, "output", b"") + self.written
             return 0
         if fn in (I_GETSTT, I_SETSTT):
+            if self.sol and self.a == SOLPATH and fn == I_SETSTT:
+                self.cost(150)
+                if self.b == SS_SOLIRQ:
+                    self.sol["sig"] = self.y
+                    self.sol_tick = self.tick
+                    return 0
+                if self.b == SS_SOLMUTE:
+                    self.sol["muted"] = self.x != 0
+                    self.sol_tick = self.tick
+                    return 0
+                return E_UNKSVC
             return self.stat(fn == I_GETSTT, self.b)
+        if fn == I_OPEN:
+            name = bytes(self.mem[self.x:self.x + 16]).split(b"\r")[0]
+            if name.upper() == b"/FSOL" and not self.sol:
+                self.sol = {"sig": 0, "muted": False}
+                self.a = SOLPATH
+                self.cost(400)
+                return 0
+            return 216                      # E$PNNF
+        if fn == I_CLOSE:
+            if self.sol and self.a == SOLPATH:
+                self.sol = None
+                return 0
+            return 0
         self.errors.append("unexpected os9 call $%02X" % fn)
         return E_UNKSVC
 

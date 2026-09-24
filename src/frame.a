@@ -24,6 +24,7 @@
 
 VIRQN               equ       525                 virtual IRQs a tick, times VIRQD
 VIRQD               equ       128
+TKMAX               equ       8                   ticks a pass catches up at most
 * the budgets, in estimated microseconds (tools/osrun.py measures the passes they give)
                     ifndef    BUDPAS
                     ifndef    BUDPAS
@@ -59,22 +60,50 @@ GLYUS               equ       1000                a glyph erased or drawn: this,
 ROWUS               equ       60                  measured 370-1,470 us, a remap of the window included
 TXMUS               equ       1500                text.a TxMatch, the lists compared (148 entries: ~1.1 ms)
 
-MainLoop            ldx       #2                  wait for the next tick (X = 1 only gives up the time slice)
+* The clock (platform.a SolOn): with SOLdrv, a signal at line 0 of every
+*   frame counts TICKS, and a pass runs the virtual IRQs of every tick
+*   since the last (TKMAX at most): a pass that ran long is caught up,
+*   not lost, as the arcade's IRQ keeps real time whatever the AVG does.
+*   Without it, one pass a tick, as before (F$Sleep X=2).
+MainLoop            tst       SOLPTH,u
+                    beq       mlt
+mls                 ldd       TICKS,u             the ticks since the last pass
+                    std       TKNOW,u
+                    subd      TSEEN,u
+                    bne       mln
+                    ldx       #0                  none yet: sleep until a signal
                     os9       F$Sleep
-                    ldd       PASSES,u            (the sign-off reports them)
+                    tst       SIGCODE,u
+                    lbne      Done
+                    bra       mls
+mln                 cmpd      #TKMAX
+                    bls       mlk
+                    ldd       #TKMAX              (a long stall: not all of it)
+mlk                 stb       TKN,u
+                    ldd       TKNOW,u
+                    std       TSEEN,u
+                    bra       mlp
+mlt                 ldx       #2                  wait for the next tick (X = 1 only gives up the time slice)
+                    os9       F$Sleep
+                    lda       #1
+                    sta       TKN,u
+mlp                 ldd       PASSES,u            (the sign-off reports them)
                     addd      #1
                     std       PASSES,u
                     tst       SIGCODE,u
                     lbne      Done
                     tst       PAUSED,u
                     lbne      PausWt
-                    ldb       #1                  one tick
+                    ldb       TKN,u               the ticks
                     lbsr      InFram              the keys, the stick, the mouse (input.a)
                     tst       QUITKEY,u
                     lbne      Done
-                    ldd       VACC,u              the virtual IRQs this tick owes
-                    addd      #VIRQN
-                    std       VACC,u
+                    ldb       TKN,u               the virtual IRQs those ticks owe
+mlv                 ldx       VACC,u
+                    leax      VIRQN,x
+                    stx       VACC,u
+                    decb
+                    bne       mlv
 ml1                 ldd       VACC,u
                     subd      #VIRQD
                     blo       ml2
@@ -88,7 +117,7 @@ ml2                 lbsr      SndOut              the POKEY image onto the SIDs 
                     bne       ml3
                     lda       <FRTIMR             the arcade's MAINLN: a game frame once 9 have run
                     cmpa      #9
-                    blo       MainLoop
+                    lblo      MainLoop
                     lbsr      GamLog
                     ldd       GFRAMS,u            (the game's frames: its pace, drawn or not)
                     addd      #1

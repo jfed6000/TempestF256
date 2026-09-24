@@ -111,6 +111,11 @@ DROPS               rmb       2                   drawings dropped (the sign-off
 DRWP0               rmb       2                   PASSES when this frame's drawing began
 SKIPNX              rmb       1                   non-zero: the next frame's drawing is dropped
 PAUSED              rmb       1                   non-zero = our terminal is a shadow (SS.WSig S$WinBg)
+SOLPTH              rmb       1                   SOLdrv's path (0: none; one pass a tick)
+TICKS               rmb       2                   ticks counted by the signal (Icpt)
+TSEEN               rmb       2                   TICKS as the last pass took them
+TKNOW               rmb       2                   TICKS read this pass
+TKN                 rmb       1                   the ticks this pass runs (1-TKMAX)
 SIGCODE             rmb       1                   abort/interrupt signal received (0 = none)
 
 * input (input.a)

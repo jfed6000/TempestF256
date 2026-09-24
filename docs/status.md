@@ -1571,6 +1571,36 @@ K2: it charges the text screens more than the hardware costs.) The arcade's zoom
 dropping two of three drawings when a drawing is very long would go further, choppier. Module
 39,851 bytes; on both disk images; the Wildbits MAME: the game and the new sign-off.
 
+## The SOL clock: lost ticks caught up (2026-09-24, host and MAME) — untested on hardware
+
+User: "Why do we care if it loses that tick?" (a lost pass is game time lost: timers, sound
+tempo, the frame pace), then "Then we can hook up the sol driver and get a signal for each tick?"
+and "you can mute the signal during a game pause". **This reverses 2026-09-23's choice** (section
+6.3 of the plan: SOLdrv weighed and not taken). SOLdrv and `/fSOL` are in the boot file; `scfg`
+uses them the same way.
+
+- **`platform.a` `SolOn`**: `/fSOL`, `SS.SOLIRQ` ($C3) with line 0 (the frame's first line, the
+  tick) and signal `SIGTK` = $A2; `Icpt` counts `TICKS`. **`frame.a` `MainLoop`**: the ticks since
+  the last pass (`TKMAX` 8 at most) run their virtual IRQs and go to `InFram`; none yet: `F$Sleep`
+  0 until a signal. So **a pass that runs long is caught up, not lost**, as the arcade's IRQ keeps
+  real time whatever the AVG does. No `/fSOL` (or an error): one pass a tick, as before.
+  **`PausWt`** mutes it (`SS.SOLMUTE` $C4) and, coming back, takes the ticks from then. `SolOff` on
+  every exit.
+- **`osrun.py` models SOLdrv**: `/fSOL`, the two calls, a signal a tick taken at the next os9 call
+  (150 µs guessed), `F$Sleep` 0 to the next tick. Every check right; **virtual IRQs 245.9 a
+  second** (the arcade's 246.1) whatever the passes do.
+- **The budget, swept with the clock in** (`osrun.py` 90 s): 11,000 16.0 game frames a second,
+  11,800 15.8, **12,600 17.7**, 13,400 17.4, 14,200 16.4, 15,000 16.0, **30,000 (no split) 19.5**
+  (longest pass 162 ms: the logo). Game time holds (245.8-245.9) in all. So the budget no longer
+  guards the clock: **it is a trade of smoothness** (sound, controls and the game's IRQs every tick)
+  against frames (+10% with no split).
+- **Both on the disk images, for the user to judge by feel**: `tempest` (the SOL clock, `BUDPAS`
+  12,600, 40,068 bytes) and **`tempnb`** (the same with `BUDPAS` 30,000 and the module name
+  `tempnb`: `make EXTRA="-DMODNB -DBUDPAS=30000"`). The Wildbits MAME delivers the signal:
+  **572 game frames in 29 s against ~414 before** (the slow clock seen there in the first session
+  was lost ticks), `tempnb` 586 with 733 line calls against 1,379. If `tempnb` feels as good, the
+  budget trackers (`Spend`, `RECUS`, `WCBUS`, the batch sizing) can go, and their space with them.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
