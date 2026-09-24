@@ -1487,6 +1487,21 @@ images and unpushed unless short returns appear.
 differ (196 s reaches heavier levels than 89 s), but a game frame is a tick shorter and a call
 lighter: **the well out of the loop is worth ~35-40% more game frames on the K2.**
 
+## The 8,192 driver installed; `w` removed (2026-09-24)
+
+User: "take out the w switch ... If the fifo has 8192, let's let the driver use it." **`grfdrv256`
+with `LD.Depth` 8,192 (`c45760ab`, still unpushed) is on both disk images** (rebuilt for each
+platform, identical to the builds compared before, targeted copy, copied back and compared); the
+Wildbits MAME boots it and runs the game. **`tempest w` is gone** (module 40,170 bytes).
+
+**Where the space went this session** (36,748 -> 40,170, file by file against `ec48bdf`): the well
+cache ~1,450 (`avg.a` capture, skip and cache; `gfx.a` `WellCom`, `WlRows`, `AvgLast`, `BmSend`;
+`text.a` hooks), the small-shape collapse ~900 (`AvShp` and its table), the SID output ~450,
+`tsnd` ~450, the sign-off's second line and the switches ~100; `BmWait` -48. **Cleanup candidates**:
+`tsnd` behind a build switch (~450), the `n` switch (~10), `AvgFlush` converting with `WlCv1`
+(~30), `AvShp`'s repeated range check (~8), the shape map at half the resolution (~64), the
+sign-off's second line (~100).
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
