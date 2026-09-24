@@ -1627,6 +1627,12 @@ batch: harmless at 255). **Module 39,826 bytes (366 free).**
 MAME: 589 game frames in 29 s, 696 line calls. **On both disk images as `tempest`; `tempnb` removed
 from them.**
 
+## Hardware: no split, the cleaned build (user, 2026-09-24)
+
+`0496149` on the K2: **4,230 game frames, 11,601 passes in 214 s: 19.8 game frames a second**
+(54.2 passes a second: long drawings are one pass now, their ticks caught up); **5,263 line calls
+(1.24 a game frame), 0 short, 5 dropped.** As `tempnb` (20.3 in 276 s), within play's spread.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
