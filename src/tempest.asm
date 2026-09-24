@@ -47,11 +47,7 @@ ModBeg              mod       eom,name,tylg,atrv,start,size the module's first b
 
                     include   data.a
 
-                    ifdef     MODNB
-name                fcs       /tempnb/            (the no-split trial: make EXTRA="-DMODNB -DBUDPAS=30000")
-                    else
 name                fcs       /tempest/
-                    endc
                     fcb       edition
 
 * the platform layer
@@ -61,8 +57,7 @@ name                fcs       /tempest/
                     include   gfx.a
                     include   text.a
                     include   sound.a             the POKEY image on the SIDs; tsnd
-* the vector generator, and the tables it and the text bitmap read.  AvgFlush sizes each batch
-* from the pass's budget (gfx.a NxtBat), so the drawing can give the tick back between them
+* the vector generator, and the tables it and the text bitmap read
                     include   avg.a
                     include   avgtab.a
                     include   glyphs.a

@@ -1608,6 +1608,25 @@ in 178 s: 16.2 game frames and 59.8 passes a second; 6,391 line calls (2.2 a gam
 214 drawings dropped** (7% of game frames: the logo, or play's heaviest). Passes under 60 no
 longer mean lost time. `tempnb` not yet reported.
 
+## No split: the budget machinery removed (2026-09-24, host and MAME)
+
+**`tempnb` on the K2 (user): "significantly better". 5,608 game frames, 16,360 passes in 276 s:
+20.3 game frames a second; 7,574 line calls (1.35 a game frame), 0 short, 7 dropped**, against
+`tempest`'s 16.2 in 178 s. So **a game frame is now two passes: the logic, then the drawing whole**
+(`frame.a`: `DRPEND` says a frame's logic ran; the next pass, a tick on, draws it, so the clear
+armed in the logic pass has run). **Removed**: the drawing coroutine and its 384-byte stack
+(`DrwBeg`, `DrwRes`, `DRWSTK`), `Spend`, `WORK`, `BUDPAS`, `BUDLOG`, `NxtBat` (batches are 255 again),
+`WlSend`, `TxSpnd`, and every estimate (`RECUS`, `WCBUS`, `WELUS`, `CALLUS`, `GLYUS`, `ROWUS`,
+`TXMUS`, `FLIPUS`, `MINBUS`, `MINREC`, `RECK`). The drop rule counts ticks now (`SKIPT` 5 ticks of
+drawing drop the next); `TKMAX` 32 (a superzapper blast is one pass of up to ~250 ms: 350-1,062
+records). avg.a is unchanged (its `AV.WCB` room still counts the well's records against their
+batch: harmless at 255). **Module 39,826 bytes (366 free).**
+
+`osrun.py` 85 s: **20.1 game frames a second, virtual IRQs 245.8 a second**, every check right;
+`sndtest.py` (now checking at either sleep) game 1,990 and tsnd 2,699 passes, 0 wrong; the Wildbits
+MAME: 589 game frames in 29 s, 696 line calls. **On both disk images as `tempest`; `tempnb` removed
+from them.**
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

@@ -171,7 +171,7 @@ def main():
         while h.cycles < end:
             pc = h.pc
             if h.mem[pc] == 0x10 and h.mem[pc + 1] == 0x3F and h.mem[pc + 2] == osrun.F_SLEEP \
-                    and h.x == 2 and h.sidbase is not None:
+                    and h.x in (0, 2) and h.sidbase is not None:     # a pass's end (0: the SOL clock)
                 checked += 1
                 img = h.mem[DATA + POKIMG:DATA + POKIMG + 16]
                 seq = 0 if a.game else h.mem[DATA + sym["TSSEQ"]]

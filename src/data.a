@@ -81,7 +81,6 @@ GFXON               rmb       1                   non-zero: GfxInit ran (GfxExit
 
 * the line sends (gfx.a BmSend) and the well (WellCom)
 BSBM                rmb       1                   BmSend: the bitmap
-BSUS                rmb       1                   BmSend: microseconds a record, for Spend
 WLST                rmb       1                   non-zero: the well is in the back layer (WLOLD as drawn)
 WLSTB               rmb       1                   frames its geometry has held, with the lines
 WLON                rmb       1                   WLOLD's records
@@ -99,16 +98,11 @@ WLDONE              rmb       1                   non-zero: AvgLast added the we
 WLOLD               rmb       56*8                the well as last seen (avg.a WMAX records)
 
 * the frame loop
-WORK                rmb       2                   this pass's budget left, estimated microseconds (Spend)
-DRAWNG              rmb       1                   non-zero: a frame's drawing is under way
-MAINSP              rmb       2                   the main loop's S while the drawing runs
-DRWSP               rmb       2                   the drawing's S while the loop runs
-DRWSTL              equ       384                 the drawing's stack, its size
-DRWSTK              rmb       DRWSTL              the drawing's stack (frame.a)
+DRPEND              rmb       1                   non-zero: a frame's logic ran; the next pass draws it
+DRWT0               rmb       2                   TICKS when this frame's drawing began
 VACC                rmb       2                   the virtual IRQ's Bresenham accumulator (frame.a)
 GFRAMS              rmb       2                   game frames run (their logic; drawn or dropped)
 DROPS               rmb       2                   drawings dropped (the sign-off)
-DRWP0               rmb       2                   PASSES when this frame's drawing began
 SKIPNX              rmb       1                   non-zero: the next frame's drawing is dropped
 PAUSED              rmb       1                   non-zero = our terminal is a shadow (SS.WSig S$WinBg)
 SOLPTH              rmb       1                   SOLdrv's path (0: none; one pass a tick)

@@ -52,9 +52,6 @@ TxCommit            lbsr      TxMatch             Z = 1: nothing changed (Draw l
                     endc
                     lbra      tcx                 (then the lists are the same: no copy either)
 tcgo
-                    ldd       #TXMUS
-                    ldx       #GLYUS+11*ROWUS     room for the biggest glyph?
-                    lbsr      Spend
                     clr       TXERS,u             nothing erased yet (ROWMSK is cleared at the first)
 * pass 1: erase what changed
                     clr       TXCLR,u             erasing
@@ -77,7 +74,6 @@ tc0                 clr       ,x+
                     bne       tc0
 tc2b                tfr       y,x
                     lbsr      TxDraw              the old entry in 0
-                    lbsr      TxSpnd
 tc2a                leay      6,y
                     puls      d
                     addd      #1
@@ -126,7 +122,6 @@ tc5                 lda       1,x                 its colour << 4 | intensity: t
                     lda       #15
 tc5a                sta       TXCLR,u
                     lbsr      TxDraw
-                    lbsr      TxSpnd
 tc6                 leax      6,x
                     puls      d
                     addd      #1
@@ -314,20 +309,6 @@ NewAt               lda       #6
                     leay      d,y
                     leay      TXLIST,y
                     rts
-
-* TxSpnd - X = an entry just drawn: its cost to the pass's budget (frame.a Spend),
-*   GLYUS and ROWUS a row.  All registers kept.
-*   The list in window A and TXOLD stay as they are while the loop runs:
-*   the game's next logic pass waits for this frame's drawing to end.
-TxSpnd              pshs      d,x,y
-                    lbsr      TxGlyph             its rows
-                    lda       GL.H,y
-                    ldb       #ROWUS
-                    mul
-                    addd      #GLYUS
-                    ldx       #GLYUS+11*ROWUS     room for the biggest next?
-                    lbsr      Spend
-                    puls      d,x,y,pc
 
 * TxSame - Z = 1 when the entries at X and Y are the same.  X, Y kept; D clobbered.
 TxSame              ldd       ,x

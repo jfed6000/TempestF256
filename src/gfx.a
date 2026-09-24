@@ -307,22 +307,9 @@ wv3                 stb       6,y
 *   the driver returns short when the line engine's FIFO lacks room.
 *   A call that draws none 20 times running, or an error (our terminal
 *   hidden), gives the batch up: a frame loses lines, nothing hangs.
-*   Each call is charged to the pass's budget (frame.a Spend), which may
-*   hand the tick back to the loop between calls.
 ********************************************************************
-AvgFlush
-                    ifdef     AVWELL
-                    lda       AVGPG+AV.WCB,u      the well's records, interpreted (avg.a): their time
-                    beq       af0
-                    pshs      b,x
-                    ldb       #WCBUS
-                    mul
-                    ldx       #MINBUS
-                    lbsr      Spend
-                    puls      b,x
-af0                 tstb
-                    lbeq      NxtBat              (only the well's)
-                    endc
+AvgFlush            tstb                          (AVWELL: 0 when the batch held only the well's room)
+                    beq       afr
                     ifne      HIRES
                     pshs      b,x                 the batch into 640 and nibbles, in place, once
                     pshs      b
@@ -334,18 +321,15 @@ hx1                 clra
                     leas      1,s
                     puls      b,x
                     endc
-                    lda       SHOWN,u             into the hidden bitmap, RECUS a record
+                    lda       SHOWN,u             into the hidden bitmap
                     eora      #1
                     sta       BSBM,u
-                    lda       #RECUS
-                    sta       BSUS,u
-                    bsr       BmSend
-                    lbra      NxtBat
+                    bra       BmSend
+afr                 rts
 
 * BmSend - X = records (640, nibbles), B = the count (1-255): SS.BmLine
-*   into bitmap BSBM until every record is drawn, each call charged to
-*   the pass's budget (Spend: B records at BSUS microseconds and the
-*   call).  The driver returns short when the line engine's FIFO lacks
+*   into bitmap BSBM until every record is drawn.  The driver returns
+*   short when the line engine's FIFO lacks
 *   room; a call that draws none 20 times running, or an error (our
 *   terminal hidden), gives up: lines lost, nothing hangs.  A, B, X, Y
 *   clobbered.
@@ -367,13 +351,6 @@ af1                 pshs      b,x                 ,s = records left, 1,s = the n
                     tfr       u,d
                     puls      u
                     bcs       afx
-                    pshs      b                   the pass's budget: B records and a call
-                    lda       BSUS,u
-                    mul
-                    addd      #CALLUS
-                    ldx       #MINBUS
-                    lbsr      Spend               (which may give the tick back here)
-                    puls      b
                     cmpb      ,s                  short (the FIFO's room ran out): counted
                     bhs       af2
                     pshs      b
@@ -426,26 +403,7 @@ afx                 puls      b,x,pc
 *   erase and its draw, draws the well's records on the erased rows again.
 ********************************************************************
 WSTAB               equ       2                   frames the geometry must hold before the back layer
-WELUS               equ       50                  a well record sent: converted and drawn (no interpreting)
-                    ifndef    WCBUS
-WCBUS               equ       110                 a well record interpreted and captured (osrun.py: 50-90 lost ticks)
-                    endc
 BMTXT               equ       2                   the text bitmap, on the back layer
-
-* WlSend - X = records (640, nibbles), B = the count: room in the pass
-*   for them and the call first (Spend may give the tick back), then
-*   BmSend at WELUS a record.
-WlSend              pshs      b,x
-                    lda       #WELUS
-                    mul
-                    addd      #CALLUS
-                    tfr       d,x
-                    ldd       #0
-                    lbsr      Spend
-                    lda       #WELUS
-                    sta       BSUS,u
-                    puls      b,x
-                    lbra      BmSend
 
 * WlAll - X = records, B = the count (1-56), A non-zero to erase: all of
 *   them into the record batch (window A + $1000), then to bitmap BSBM.
@@ -460,7 +418,7 @@ wa1                 lbsr      WlCv1
                     puls      b
                     ldx       VWIN,u
                     leax      $1000,x
-                    bra       WlSend
+                    lbra      BmSend
 
 * WlSame - WLNEW, WLN, and WLSAM: this frame's well has WLOLD's geometry.
 WlSame              ldx       VWIN,u
@@ -580,7 +538,7 @@ wl3n                leax      8,x
                     beq       wl3x
                     ldx       VWIN,u
                     leax      $1000,x
-                    lbsr      WlSend
+                    lbsr      BmSend
 wl3x                rts                           (WLOLD stays the back layer's)
 wl4                 ldb       WLON,u              changed: the old one out of the back layer
                     beq       wl4a
@@ -708,25 +666,10 @@ wr5n                leax      8,x
                     sta       BSBM,u
                     ldx       VWIN,u
                     leax      $1000,x
-                    lbra      WlSend
+                    lbra      BmSend
 wrx                 rts
                     endc
 
-* NxtBat - AVGPG+AV.RMAX, the next batch's size: the records the pass's
-*   budget still covers, (WORK - CALLUS) / RECUS, at least MINREC, at
-*   most 255.  U = the data area; A, B clobbered.
-NxtBat              ldd       WORK,u
-                    subd      #CALLUS
-                    blt       nb1
-                    lslb
-                    rola                          A = D / 128 (D < 32768)
-                    ldb       #RECK
-                    mul                           A = D / RECUS
-                    cmpa      #MINREC
-                    bhs       nb2
-nb1                 lda       #MINREC
-nb2                 sta       AVGPG+AV.RMAX,u
-                    rts
 
 ********************************************************************
 * ClutCommit - the colours that changed in colour RAM (CLRSHD, which
