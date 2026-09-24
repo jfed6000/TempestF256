@@ -1472,6 +1472,15 @@ with the text, and the well has 16 lanes and 48 segments.
   and 1,800 for the build before. **Module 40,178 bytes of 40,192: 14 left** (tsnd's help is one
   line now). On both disk images.
 
+## Hardware: the well out of the loop (user, 2026-09-24)
+
+`4794628` on the K2: **1,594 game frames, 5,383 passes in 89 s: 17.9 game frames and 60.5 passes a
+second** (no tick lost), **3,151 line calls, 0 short**: the best run yet (12.3-16.5 before; other
+levels, so `tempest w` on this image is the clean comparison, not yet run). **2.0 `SS.BmLine` calls
+a game frame, and none came back short** even with the 4,096 driver: no frame's batch fills its
+room, so **the 8,192 driver change (`c45760ab`, local) would gain nothing now**; it stays off the
+images and unpushed unless short returns appear.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
