@@ -1338,12 +1338,21 @@ the changed segments redrawn; geometry changed, the back-layer well erased (its 
 segments it cut. Estimated 10-15% more game frames in play: ~42-48 records a frame fewer through the
 driver and, more, through the budget's `RECUS` charge.
 
-**Step 1, prepared, NOT on the disk images** (they hold `107bf7d` for the `tempest` / `tempest n`
-comparison): `GfxInit` puts tile map 0 (off) on layer 0 in front, the lines on layer 1, **the text
+**Step 1, prepared** (on the disk images since the sound comparison, below): `GfxInit` puts tile map 0 (off) on layer 0 in front, the lines on layer 1, **the text
 bitmap on layer 2 at the back**. A line crossing text now covers it. `osrun.py` composes its
 pictures front to back from the layers as set (it had the text in front hard-coded). `osrun.py`
 40 s: every check right, 15.1 game frames a second; the Wildbits MAME: title, coin, start, rating
 screen (text shown from the back layer), sign-off. Module 38,792 bytes (unchanged).
+
+## Hardware: sound through the MMU costs nothing measurable (user, 2026-09-23)
+
+`107bf7d` on the K2: **`tempest` 1,599 game frames, 5,754 passes in 97 s** (16.5 and 59.3 a second;
+~66 of 5,820 ticks lost, 1.1%); **`tempest n` 2,087 game frames, 8,065 passes in 135 s** (15.5 and
+59.7; ~35 of 8,100, 0.4%). The difference is inside the sign-off's error (whole seconds, ±60
+ticks); the frame rates follow what was played. The same sound through `F$MapBlk` lost 2.7%
+(58.4 passes a second): **mapping the SIDs with `F$MapBlk`, and the service window swapped
+between them and the text, cost the hardware far more than the model charges.** The MMU path
+stays. **The layer swap (`6371403`) is now on both disk images**, for its own run.
 
 ## Open items
 
