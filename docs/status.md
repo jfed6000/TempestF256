@@ -1414,6 +1414,27 @@ platforms' builds of the old source were first checked identical to the drivers 
 `SS.BmLine` call and each that came back short; `osrun.py`'s driver never runs short, so it
 reads 0 there). On both disk images with the well cache (module 39,764 bytes, 428 left).
 
+## Hardware: the well cache, first run (user, 2026-09-24)
+
+`2c1701f` on the K2 (the well cache, the old 4,096 driver): **3,675 game frames, 17,958 passes in
+299 s: 12.3 game frames and 60.1 passes a second, no tick lost.** Below the earlier runs' 14.0-16.5,
+but those were other lengths and levels; not a clean comparison. User: "every time we change
+something we get slower ... are we still calculating [the well]?" **Yes: only its drawing left the
+loop.** The interpreter still runs its sub-list every frame and the budget charges it 48 x
+`WCBUS` 110 µs, ~5.3 ms (it was 48 x `RECUS` 150, ~7.2 ms); and the records not in the back layer's
+colour (the player's lane, most frames) go in **a call of their own**: in the Wildbits MAME (call
+counts are logic, not timing) 1,800 `SS.BmLine` calls in 29 s against 1,169 with the cache off,
+~55% more, at ~450 µs each on the K2. So the cache as built may well cost more than it saves.
+
+**`tempest w`**: the game with the cache off (`AV.WENA` 0; the well with the lines, as before), for
+a comparison on one image. On both disk images (module 39,772 bytes).
+
+**The fix, proposed**: take the well out of the loop for real. Keep the well sub-list's bytes and
+the interpreter's state after it; when the bytes are unchanged (Atari rebuilds the well only when
+its shape changes, `ROTDIS`), do not run it at all: restore that state and charge nothing; when only
+its colour `STAT`s changed, run it as now. And put the off-colour records in the frame's batch, not a
+call of their own.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

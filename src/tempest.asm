@@ -10,7 +10,7 @@
 * line engine (gfx.a), text is glyph masks on a bitmap of its own
 * (text.a), and the controls feed the arcade's switch bytes (input.a).
 *
-* Usage: tempest [s | n]      (s: the sound test; n: the game without sound)
+* Usage: tempest [s | n | w]  (s: the sound test; n: no sound; w: no well cache)
 *   5  coin      1 / 2  start      q  quit
 *   left/right arrows turn, Shift fires, z superzaps; joystick 0 and
 *   the mouse (with SS.MsDelta) too.

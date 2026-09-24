@@ -158,8 +158,12 @@ Draw                ldd       #0                  room for the first batch?
                     bsr       Spend               (a later tick: the clear GamLog armed has run)
                     lbsr      NxtBat              its size, from the budget
                     ifdef     AVWELL
-                    lda       #1                  the well's records captured (avg.a)
-                    sta       AVGPG+AV.WENA,u
+                    clra                          the well's records captured (avg.a), unless
+                    ldb       TSMODE,u            "tempest w": the well with the lines, as before
+                    cmpb      #'w
+                    beq       dr1
+                    inca
+dr1                 sta       AVGPG+AV.WENA,u
                     endc
                     lbsr      AvgRun              records to AvgFlush (gfx.a), which Spends
                     ifdef     AVWELL
