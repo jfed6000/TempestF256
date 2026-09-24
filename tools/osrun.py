@@ -46,14 +46,18 @@ W, H = 320, 240
 F_EXIT, F_ICPT, F_SLEEP, F_TIME = 0x06, 0x09, 0x0A, 0x15
 F_ALLRAM, F_MAPBLK, F_CLRBLK, F_DELRAM = 0x39, 0x4F, 0x50, 0x51
 I_WRITE, I_GETSTT, I_SETSTT = 0x8A, 0x8D, 0x8E
-SS_OPT, SS_JOY, SS_ASCRN, SS_DSCRN, SS_FSCRN, SS_PSCRN = 0x00, 0x13, 0x8B, 0x8C, 0x8D, 0x8E
+I_OPEN, I_CLOSE = 0x84, 0x8F
+SS_SOLIRQ, SS_SOLMUTE = 0xC3, 0xC4                 # SOLdrv (/fSOL): a signal at a line of every frame
+SOLPATH, SIGCOST = 5, 150                          # its path here; a signal delivered, guessed (us)
+SS_OPT, SS_JOY, SS_ASCRN, SS_MCR, SS_FSCRN, SS_LAYER = 0x00, 0x13, 0x8B, 0x8C, 0x8D, 0x8E
 SS_LIVEKEYS, SS_CLUTWRITE, SS_MSDELTA = 0xC6, 0xCF, 0xD0
-SS_WSIG, SS_BMBLK, SS_BMCLEAR, SS_BMLINE = 0xE1, 0xE4, 0xE5, 0xE7
+SS_WSIG, SS_BMBLK, SS_BMCLEAR, SS_BMLINE, SS_BMCFG = 0xE1, 0xE4, 0xE5, 0xE7, 0xED
 E_UNKSVC, E_ILLARG, E_DEVBSY = 208, 187, 250
 # The DMA engine (TinyVKY_DMA_Controller.v WAIT_2_TRF): a fill runs only in vertical blanking, at
 # once if armed before line 42 of the 525, else from the next line 0 (the tick); the CPU is halted
 # while it runs, 384 us 16-bit, 768 8-bit.  Wait mode 7 returns when it is done, 0 at once.
 LINE = TICK / 525
+HIINT = 12                                  # gfx.a: CLUT 1's intensity (branch hires640)
 DMA_WINDOW = 42
 
 
@@ -81,6 +85,9 @@ class Host(CPU6809):
         self.bm = {}                            # bitmap # -> first block
         self.layers = [None, None, None]
         self.clut = [(0, 0, 0, 0)] * 256
+        self.clut1 = [(0, 0, 0, 0)] * 256       # CLUT 1: the 640x240 line bitmaps' (branch hires640)
+        self.hires = [False] * 3                # SS.BmCfg HIRES4, per bitmap
+        self.bmclut = [0] * 3
         self.script = script
         self.oscycles = 0
         self.calls = {}
@@ -99,6 +106,54 @@ class Host(CPU6809):
         self.pass_logic, self.pass_rec, self.pass_gly, self.pass_logcyc = False, 0, 0, 0
         self.cp = bytearray(32)             # the integer coprocessor (D8), as JR_Math_Block.v
         self.map_io(0xFEE0, 0xFEFF, self.cp_read, self.cp_write)
+        self.sol = None                     # SOLdrv: {"sig", "muted"} while /fSOL is open
+        self.sol_tick = 0                   # the last tick its signal was delivered for
+        self.mmuctl = 0                     # $FFA0: the active LUT (bits 1-0), the edited one (5-4)
+        self.map_io(0xFFA0, 0xFFAF, self.mmu_read, self.mmu_write)
+
+    # --- the MMU's registers (sound.a SidOn/SidOff, the user-approved exception) -------------
+    # Only a slot that holds one of the windows OS-9 mapped may be changed, only with interrupts
+    # masked, only in the active LUT, and no os9 call may come while a window holds another block.
+    def mmu_read(self, a):
+        if a == 0xFFA0:
+            return self.mmuctl
+        if a >= 0xFFA8:
+            base = (a - 0xFFA8) * 8192
+            return self.mapped.get(base, 0xFF)          # (a slot that is not a window: not modelled)
+        return 0
+
+    def mmu_write(self, a, v):
+        if not self.cc & 0x10:
+            self.errors.append("MMU $%04X written with IRQ unmasked" % a)
+        if a == 0xFFA0:
+            self.mmuctl = v
+            return
+        if a < 0xFFA8:
+            self.errors.append("MMU $%04X written" % a)
+            return
+        if (self.mmuctl >> 4) & 3 != self.mmuctl & 3:
+            self.errors.append("an MMU slot written in a LUT that is not the active one")
+            return
+        base = (a - 0xFFA8) * 8192
+        if base not in self.mapped:
+            self.errors.append("MMU slot %d written: not a window OS-9 mapped" % (a - 0xFFA8))
+            return
+        self.block(self.mapped[base])[:] = self.mem[base:base + 8192]
+        self.mapped[base] = v
+        self.mem[base:base + 8192] = self.block(v)
+        self.on_map(base, v)
+
+    def on_map(self, base, block):
+        pass
+
+    def windows_own(self):
+        """at an os9 call: every window must hold the block OS-9 gave it"""
+        own = getattr(self, "own", None)
+        if own is None:
+            return
+        for base, b in self.mapped.items():
+            if own.get(base, b) != b:
+                self.errors.append("os9 call with window $%04X holding block $%02X" % (base, b))
 
     def cp_read(self, a):
         if not self.cc & 0x10:
@@ -149,6 +204,12 @@ class Host(CPU6809):
         b = self.bm[n] + off // 8192
         self.block(b)[off % 8192] = v
 
+    def bm_nibble(self, n, x, y, col):
+        off = y * W + x // 2
+        blk = self.block(self.bm[n] + off // 8192)
+        v = blk[off % 8192]
+        blk[off % 8192] = (v & 0x0F | (col & 15) << 4) if x % 2 == 0 else (v & 0xF0 | col & 15)
+
     def bm_bytes(self, n):
         self.sync_out()
         return b"".join(bytes(self.block(self.bm[n] + i)) for i in range(10))[:W * H]
@@ -159,6 +220,7 @@ class Host(CPU6809):
         if self.mem[pc] == 0x10 and self.mem[pc + 1] == 0x3F:
             fn = self.mem[pc + 2]
             self.pc = (pc + 3) & 0xFFFF
+            self.windows_own()
             self.calls[fn] = self.calls.get(fn, 0) + 1
             self.dma_halt()
             c0 = self.cycles
@@ -172,15 +234,43 @@ class Host(CPU6809):
             return
         super().step()
 
+    def sol_deliver(self):
+        """SOLdrv's line-0 signal, one a tick, taken at the next os9 call (as a signal is, when the
+        process next enters the kernel): the module's Icpt counts TICKS"""
+        so = self.sol
+        if not so or not so["sig"]:
+            self.sol_tick = self.tick
+            return
+        while self.sol_tick < self.tick:
+            self.sol_tick += 1
+            if not so["muted"] and "TICKS" in self.sym:
+                a = DATA + self.sym["TICKS"]
+                t = (self.mem[a] << 8 | self.mem[a + 1]) + 1
+                self.mem[a], self.mem[a + 1] = (t >> 8) & 0xFF, t & 0xFF
+                self.cost(SIGCOST)
+
     def os9(self, fn):
+        self.sol_deliver()
         if fn == F_EXIT:
             raise Exit(self.b)
         if fn == F_ICPT:
             return 0
         if fn == F_SLEEP:
             n = self.x
-            if n == 0:
-                raise Exit("F$Sleep 0: asleep for ever")
+            if n == 0:                      # until a signal: SOLdrv's, at the next tick
+                if not (self.sol and self.sol["sig"] and not self.sol["muted"]):
+                    raise Exit("F$Sleep 0: asleep for ever")
+                if self.woke is not None:
+                    self.passes.append(self.cycles - self.woke)
+                    self.pass_info.append((self.cycles - self.woke, self.pass_logic, self.records - self.pass_rec,
+                                           self.pass_gly, self.pass_logcyc))
+                    self.pass_logic, self.pass_rec, self.pass_gly, self.pass_logcyc = False, self.records, 0, 0
+                    self.lost += self.tick - self.woke_tick
+                self.cycles = (self.tick + 1) * TICK
+                self.dma_halt()
+                self.sol_deliver()
+                self.woke, self.woke_tick = self.cycles, self.tick
+                return 0
             if n == 2 and self.woke is not None:    # a pass of the frame loop ends
                 self.passes.append(self.cycles - self.woke)
                 self.pass_info.append((self.cycles - self.woke, self.pass_logic, self.records - self.pass_rec,
@@ -211,6 +301,8 @@ class Host(CPU6809):
                 return 207
             base = free[0]
             self.mapped[base] = self.x
+            self.own = getattr(self, "own", {})
+            self.own[base] = self.x
             self.mem[base:base + 8192] = self.block(self.x)
             self.u = base
             self.cost(220)
@@ -220,6 +312,7 @@ class Host(CPU6809):
             if base in self.mapped:
                 self.block(self.mapped[base])[:] = self.mem[base:base + 8192]
                 del self.mapped[base]
+                getattr(self, "own", {}).pop(base, None)
                 self.mem[base:base + 8192] = bytes(8192)
             self.cost(220)
             return 0
@@ -230,7 +323,31 @@ class Host(CPU6809):
             self.output = getattr(self, "output", b"") + self.written
             return 0
         if fn in (I_GETSTT, I_SETSTT):
+            if self.sol and self.a == SOLPATH and fn == I_SETSTT:
+                self.cost(150)
+                if self.b == SS_SOLIRQ:
+                    self.sol["sig"] = self.y
+                    self.sol_tick = self.tick
+                    return 0
+                if self.b == SS_SOLMUTE:
+                    self.sol["muted"] = self.x != 0
+                    self.sol_tick = self.tick
+                    return 0
+                return E_UNKSVC
             return self.stat(fn == I_GETSTT, self.b)
+        if fn == I_OPEN:
+            name = bytes(self.mem[self.x:self.x + 16]).split(b"\r")[0]
+            if name.upper() == b"/FSOL" and not self.sol:
+                self.sol = {"sig": 0, "muted": False}
+                self.a = SOLPATH
+                self.cost(400)
+                return 0
+            return 216                      # E$PNNF
+        if fn == I_CLOSE:
+            if self.sol and self.a == SOLPATH:
+                self.sol = None
+                return 0
+            return 0
         self.errors.append("unexpected os9 call $%02X" % fn)
         return E_UNKSVC
 
@@ -238,7 +355,7 @@ class Host(CPU6809):
         self.cost(150)
         if code == SS_OPT:
             return 0
-        if code == SS_DSCRN:
+        if code == SS_MCR:
             if get:
                 self.x, self.y = 0x0001, 0x00FF
             else:
@@ -263,6 +380,14 @@ class Host(CPU6809):
             if n > 2:
                 return E_ILLARG
             self.bm[n] = 0x80 + 10 * n
+            return 0
+        if code == SS_BMCFG and not get:
+            if n > 2:
+                return E_ILLARG
+            if self.x & 0xFF != 0xFF:
+                self.bmclut[n] = self.x & 0xFF
+            if self.u >> 8 != 0xFF:
+                self.hires[n] = bool(self.u >> 8)
             return 0
         if code == SS_BMBLK and get:
             self.x = self.bm[n]
@@ -289,7 +414,7 @@ class Host(CPU6809):
                 self.sync_in(self.bm[n] + i)
             self.cost(400)
             return 0
-        if code == SS_PSCRN and not get:
+        if code == SS_LAYER and not get:
             self.layers[self.x] = self.y
             if self.x == 1:
                 self.flipped()
@@ -298,9 +423,10 @@ class Host(CPU6809):
             return 0
         if code == SS_CLUTWRITE and not get:
             first, cnt = self.y & 0xFF, self.u
+            clut = self.clut1 if self.y >> 8 == 1 else self.clut
             for i in range(cnt):
                 p = self.x + 4 * i
-                self.clut[first + i] = tuple(self.mem[p:p + 4])
+                clut[first + i] = tuple(self.mem[p:p + 4])
             return 0
         if code == SS_BMLINE and not get:
             cnt = self.u
@@ -309,17 +435,23 @@ class Host(CPU6809):
             self.dma_halt()
             if self.dma and self.dma[0] == n and self.cycles < self.dma[2]:
                 self.errors.append("SS.BmLine into bitmap %d before its clear has run" % n)
+            self.sync_out()                 # what the program wrote through a window first (the
+                                            # text bitmap is drawn both ways): one memory on the F256
             for i in range(cnt):
                 p = self.x + 8 * i
                 x0, x1 = self.rd16(p), self.rd16(p + 2)
                 y0, y1, col = self.mem[p + 4], self.mem[p + 5], self.mem[p + 6]
-                if x0 > 319 or x1 > 319 or y0 > 239 or y1 > 239:
+                maxx = 639 if self.hires[n] else 319
+                if x0 > maxx or x1 > maxx or y0 > 239 or y1 > 239:
                     self.errors.append("SS.BmLine: a record off the bitmap (%d,%d)-(%d,%d)"
                                        % (x0, y0, x1, y1))
                     self.u = i
                     return E_ILLARG
                 for (x, y) in av.bresenham(x0, y0, x1, y1):
-                    self.bm_write(n, y * W + x, col)
+                    if self.hires[n]:
+                        self.bm_nibble(n, x, y, col)
+                    else:
+                        self.bm_write(n, y * W + x, col)
                 self.frame_records.append((x0, y0, x1, y1, col, n))
             for i in range(10):
                 self.sync_in(self.bm[n] + i)
@@ -347,6 +479,18 @@ class Host(CPU6809):
             col, row = struct.unpack(">hh", t[2:6])
             gl = GLYPHS[(g & 0x7F) * 2 + (1 if g & 0x80 else 0)]
             gx, gy, gw, gh = gl[0], gl[1], gl[2], gl[3]
+            if self.hires[2]:                   # 640 dots, 2-byte rows, nibble colour + 1
+                nib = min((clut >> 4) + 1, 15)
+                for r in range(gh):
+                    bits = gl[4 + 2 * r] << 8 | gl[5 + 2 * r]
+                    for c in range(gw):
+                        if bits << c & 0x8000:
+                            x, y = col + gx + c, row + gy + r      # col in 640ths
+                            if 0 <= x < 2 * W and 0 <= y < H:
+                                o = y * W + x // 2
+                                want[o] = (want[o] & 0x0F | nib << 4) if x % 2 == 0 \
+                                    else (want[o] & 0xF0 | nib)
+                continue
             for r in range(gh):
                 bits = gl[4 + r]
                 for c in range(gw):
@@ -355,10 +499,13 @@ class Host(CPU6809):
                         if 0 <= x < W and 0 <= y < H:
                             want[y * W + x] = clut
         have = self.bm_bytes(2)
-        bad = sum(1 for i in range(W * H) if have[i] != want[i])
-        if bad:
-            self.errors.append("frame %d: the text bitmap differs from its list in %d pixels"
-                               % (self.flips, bad))
+        if "WLST" in sym and self.hires[2]:
+            self.check_well(want, have)
+        else:
+            bad = sum(1 for i in range(W * H) if have[i] != want[i])
+            if bad:
+                self.errors.append("frame %d: the text bitmap differs from its list in %d pixels"
+                                   % (self.flips, bad))
         cram = self.mem[d + sym["CLRSHD"]:d + sym["CLRSHD"] + 16]
         for i in range(256):
             r, g, b = clut_int(cram, i)
@@ -366,12 +513,24 @@ class Host(CPU6809):
                 self.errors.append("frame %d: CLUT entry %d is %s, colour RAM says %s"
                                    % (self.flips, i, self.clut[i][:3], (b, g, r)))
                 break
+        if self.hires[0]:
+            for k in range(1, 16):
+                r, g, b = clut_int(cram, (k - 1) * 16 + HIINT)
+                if self.clut1[k][:3] != (b, g, r):
+                    self.errors.append("frame %d: CLUT 1 entry %d is %s, colour RAM says %s"
+                                       % (self.flips, k, self.clut1[k][:3], (b, g, r)))
+                    break
         shown = self.layers[1]
         lines = bytearray(W * H)
         for (x0, y0, x1, y1, col, n) in self.frame_records:
             if n == shown:
                 for (x, y) in av.bresenham(x0, y0, x1, y1):
-                    lines[y * W + x] = col
+                    if self.hires[n]:
+                        o = y * W + x // 2
+                        lines[o] = (lines[o] & 0x0F | (col & 15) << 4) if x % 2 == 0 \
+                            else (lines[o] & 0xF0 | col & 15)
+                    else:
+                        lines[y * W + x] = col
         if bytes(lines) != self.bm_bytes(shown):
             self.errors.append("frame %d: the bitmap shown is not exactly this frame's records"
                                % self.flips)
@@ -382,21 +541,80 @@ class Host(CPU6809):
         self.text_stats = getattr(self, "text_stats", []) + [(len(texts), changed)]
         self.prev_texts = texts
 
+    def well_records(self, addr, n):
+        """n records (320, gfx.a's form) at addr: (x0, y0, x1, y1, nibble) as sent at 640"""
+        out = []
+        for k in range(n):
+            b = self.mem[addr + 8 * k:addr + 8 * k + 8]
+            x0, x1 = struct.unpack(">hh", bytes(b[0:4]))
+            out.append((2 * x0, b[4], 2 * x1, b[5], min((b[6] >> 4) + 1, 15)))
+        return out
+
+    def check_well(self, want, have):
+        """gfx.a WellCom (AVWELL): the text bitmap holds the text list and, while WLST says the well
+        is in the back layer, WLOLD's lines; where glyph and well, or two well records, meet, any of
+        their colours.  Nothing else lit.  With the lines instead, this frame's captured well
+        records must be among the records the shown bitmap was drawn with."""
+        sym, d = self.sym, DATA
+        cached = self.mem[d + sym["WLST"]]
+        wellcol = {}
+        if cached:
+            for (x0, y0, x1, y1, nib) in self.well_records(d + sym["WLOLD"], self.mem[d + sym["WLON"]]):
+                for (x, y) in av.bresenham(x0, y0, x1, y1):
+                    wellcol.setdefault((x, y), set()).add(nib)
+        bad = 0
+        for y in range(H):
+            for x in range(2 * W):
+                o = y * W + x // 2
+                sh = 4 if x % 2 == 0 else 0
+                h, t = (have[o] >> sh) & 15, (want[o] >> sh) & 15
+                w = wellcol.get((x, y))
+                if w:
+                    ok = h in w or (t and h == t) or (t and len(w) and h != 0)
+                else:
+                    ok = h == t
+                bad += not ok
+        if bad:
+            self.errors.append("frame %d: the text bitmap differs from its text%s in %d dots" %
+                               (self.flips, " and cached well" if cached else "", bad))
+        self.well_frames = getattr(self, "well_frames", [0, 0])
+        self.well_frames[1 if cached else 0] += 1
+        vwin = self.rd16(d + sym["VWIN"])
+        n = self.mem[d + sym["AVGPG"] + sym["AV.WNC"]]
+        sent = {r[:5] for r in self.frame_records if r[5] == self.layers[1]}
+        new = self.well_records(vwin + 0x1E00, n)
+        if cached:          # the records not in the back layer's colour: with the lines
+            old = self.well_records(d + sym["WLOLD"], self.mem[d + sym["WLON"]])
+            need = [r for r, o in zip(new, old) if r[4] != o[4]]
+        else:
+            need = new
+        miss = [r for r in need if r not in sent]
+        if miss:
+            self.errors.append("frame %d: %d of the well's records not drawn with the lines"
+                               % (self.flips, len(miss)))
+
     def picture(self, path):
-        lines, text = self.bm_bytes(self.layers[1]), self.bm_bytes(2)
+        # the layers front (0) to back (2): the first non-transparent dot wins; a tile map shows nothing
+        srcs = [(self.bm_bytes(src), self.hires[src]) for src in self.layers if src is not None and src < 3]
         rows = []
         for y in range(H):
             row = bytearray([0])
-            for x in range(W):
-                i = text[y * W + x] or lines[y * W + x]
-                b, g, r, _ = self.clut[i] if i else (0, 0, 0, 0)
+            for x in range(2 * W):                  # 640 wide: the 320 planes' dots doubled
+                b = g = r = 0
+                for plane, hi in srcs:
+                    v = plane[y * W + x // 2]
+                    if hi:
+                        v = v >> 4 if x % 2 == 0 else v & 15
+                    if v:
+                        b, g, r, _ = self.clut1[v] if hi else self.clut[v]
+                        break
                 row += bytes((r, g, b))
             rows.append(bytes(row))
 
         def chunk(t, dd):
             c = struct.pack(">I", len(dd)) + t + dd
             return c + struct.pack(">I", zlib.crc32(t + dd) & 0xFFFFFFFF)
-        png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
+        png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 2 * W, H, 8, 2, 0, 0, 0))
                + chunk(b"IDAT", zlib.compress(b"".join(rows), 9)) + chunk(b"IEND", b""))
         with open(path, "wb") as f:
             f.write(png)
@@ -414,7 +632,7 @@ def clut_int(cram, index):
 
 
 def load_glyphs():
-    """GlyTab from src/glyphs.a, 15 bytes a record, as signed/unsigned values."""
+    """GlyTab from src/glyphs.a, 15 bytes a record (26 for a 640 plane's), as signed/unsigned values."""
     out = []
     for line in open(os.path.join(SRC, "glyphs.a")):
         if line.startswith("\tfcb\t"):
@@ -550,6 +768,8 @@ def main():
         for e in h.errors[:20]:
             print("  " + e)
         sys.exit(1)
+    if getattr(h, "well_frames", None):
+        print("the well: with the lines %d game frames, in the back layer %d" % tuple(h.well_frames))
     print("checks: text bitmap, CLUT and line bitmap right after every game frame's drawing")
 
 

@@ -1,0 +1,430 @@
+********************************************************************
+* sound.a - the POKEY register image (POKIMG, written by ALSOUN's
+*   MODSND) played on the two soft SIDs (plan D5 (a), stage 4), and
+*   tsnd, the sound test (tempest s).
+*
+*   The SIDs are in the I/O block $C4 (the FPGA's $18_8000: left at
+*   +$000, right at +$100; +$080 writes both).  They are reached by
+*   writing the MMU directly (user's call, 2026-09-23: the third absolute
+*   address exception, $FFA0-$FFAF): interrupts masked, window A's slot
+*   holds $C4 while the SIDs are written, then its block again.  With
+*   interrupts masked no task switch can reload the MMU, and vector RAM
+*   is only used by the main loop, which SndOut is part of.
+*   Two SIDs are six voices for the POKEYs' eight channels; Tempest
+*   sounds at most five at once (docs/status.md, "Sound"), so a
+*   channel takes a free voice when it starts sounding and gives it
+*   back when it stops.
+*
+*   The mapping (POKEY at 1.512 MHz, 64 kHz base = 54,000 Hz; the
+*   SID at 14.318 MHz / 15 = 954,545 Hz):
+*     pure tone (AUDC $Ax, $Ex): pulse, 50%, at 27,000 / (AUDF+1) Hz,
+*       SID frequency 474,555 / (AUDF+1), held to $FFFF;
+*     the polynomial forms (the rest): noise, its shift register
+*       stepped 54,000 / (AUDF+1) times a second as the POKEY samples
+*       its polys, SID frequency 59,319 / (AUDF+1);
+*     volume (AUDC's low 4 bits; 0, or bit 4 "volume only", is
+*       silence): the sustain level, attack and decay 0 (2 ms and
+*       6 ms), release 0.  A SID's envelope does not climb to a raised
+*       sustain, so a louder volume, or a new waveform, re-gates.
+*   Written once a pass (60 Hz), where the arcade's POKEYs change at
+*   the IRQ's 246 Hz; only the registers that change are written.
+*   Runs with U = the data area and DP its page.
+********************************************************************
+
+SIDBLK              equ       $C4                 the I/O block the SIDs are in
+SIDPWH              equ       $08                 a pulse's width, high nibble: 50%
+SIDVOL              equ       $0F                 each SID's master volume, filters off
+SNFDIV              equ       59319               the noise's SID frequency times (AUDF+1)
+
+MMUCTL              equ       $FFA0               the MMU: bits 1-0 the active LUT, 5-4 the one $FFA8-$FFAF edit
+MMUSLT              equ       $FFA8               the edited LUT's eight slots (read and write)
+
+* SidOn - interrupts masked, window A's slot holding the SIDs' block.
+*   Exit: X = the left SID.  Y, U kept.  SidOff must follow, soon: it
+*   puts the slot and the mask back.
+SidOn               tfr       cc,a
+                    sta       SNDCC,u
+                    orcc      #$50
+                    lda       MMUCTL              pic:ok the MMU (user-approved exception)
+                    sta       SNDF0,u
+                    anda      #$03                edit the active LUT
+                    lsla
+                    lsla
+                    lsla
+                    lsla
+                    pshs      a
+                    lda       SNDF0,u
+                    anda      #$CF
+                    ora       ,s+
+                    sta       MMUCTL              pic:ok
+                    lda       VWIN,u              window A's slot: its address / 8K
+                    lsra
+                    lsra
+                    lsra
+                    lsra
+                    lsra
+                    sta       SNDSL,u
+                    ldx       #MMUSLT
+                    ldb       SNDSL,u
+                    lda       b,x
+                    sta       SNDOB,u             its block, to put back
+                    lda       #SIDBLK
+                    sta       b,x
+                    ldx       VWIN,u
+                    rts
+
+* SidOff - window A's block back in its slot, the MMU's LUT selection
+*   and the interrupt mask as SidOn found them.  All registers kept but CC.
+SidOff              pshs      a,b,x
+                    ldx       #MMUSLT
+                    ldb       SNDSL,u
+                    lda       SNDOB,u
+                    sta       b,x
+                    lda       SNDF0,u
+                    sta       MMUCTL              pic:ok
+                    lda       SNDCC,u
+                    tfr       a,cc
+                    puls      a,b,x,pc
+
+* SidReg - X = the left SID, B = voice 0-5: Y = the voice's registers.
+*   B, X kept.
+SidReg              pshs      b,x
+                    leay      SidVof,pcr
+                    lslb
+                    ldd       b,y
+                    addd      1,s
+                    tfr       d,y
+                    puls      b,x,pc
+SidVof              fdb       $000,$007,$00E,$100,$107,$10E
+
+********************************************************************
+* SndInit - both SIDs silent and set up; every voice free.
+*   Exit: carry = error in B.
+********************************************************************
+SndInit             lbsr      SidOn
+                    ldb       #$19                every register of both SIDs to 0
+si1                 decb
+                    clr       b,x
+                    leay      $100,x
+                    clr       b,y
+                    tstb
+                    bne       si1
+                    clrb                          each voice's pulse width
+si2                 bsr       SidReg
+                    lda       #SIDPWH
+                    sta       3,y
+                    incb
+                    cmpb      #6
+                    blo       si2
+                    lda       #SIDVOL
+                    sta       $18,x
+                    sta       $118,x
+                    lbsr      SidOff
+                    leay      SNDVCH,u            no voice owned, no channel voiced
+                    ldb       #6+8
+                    lda       #$FF
+si3                 sta       ,y+
+                    decb
+                    bne       si3
+                    leay      SNDVC,u             the shadows: gate off, sustain 0, frequency 0
+                    ldb       #6+6+12
+si4                 clr       ,y+
+                    decb
+                    bne       si4
+                    inc       SNDUP,u
+                    clrb
+                    rts
+
+********************************************************************
+* SndExit - every voice gated off, both SIDs' volume 0.
+********************************************************************
+SndExit             tst       SNDUP,u
+                    beq       sxx
+                    clr       SNDUP,u
+                    lbsr      SidOn
+                    clrb
+se1                 bsr       SidReg
+                    clr       4,y
+                    incb
+                    cmpb      #6
+                    blo       se1
+                    clr       $18,x
+                    clr       $118,x
+                    lbra      SidOff
+sxx                 rts
+
+********************************************************************
+* SndOut - POKIMG onto the SIDs (once a pass).  A, B, X, Y clobbered.
+********************************************************************
+SndOut              tst       SNDUP,u
+                    lbeq       sox
+                    lbsr      SidOn               (masked until SidOff)
+                    stx       SNDBAS,u
+                    clr       SNDCH,u
+so1                 ldb       SNDCH,u             channel c: AUDF at POKIMG + 2c, AUDC after it
+                    lslb
+                    leay      POKIMG,u
+                    leay      b,y
+                    lda       1,y
+                    bita      #$10                volume only: no waveform, silence here
+                    lbne      soff
+                    anda      #$0F
+                    lbeq      soff
+                    lsla                          the sustain level
+                    lsla
+                    lsla
+                    lsla
+                    sta       SNDSR,u
+                    ldb       SNDCH,u             its voice, or a free one
+                    leax      SNDCHV,u
+                    lda       b,x
+                    cmpa      #$FF
+                    bne       so3
+                    leax      SNDVCH,u
+                    clra
+so2                 ldb       a,x
+                    cmpb      #$FF
+                    beq       so2a
+                    inca
+                    cmpa      #6
+                    blo       so2
+                    lbra      sonx                none free: this channel waits
+so2a                ldb       SNDCH,u
+                    stb       a,x                 the voice's channel
+                    leax      SNDCHV,u
+                    sta       b,x                 the channel's voice
+so3                 sta       SNDV,u
+                    ldb       ,y                  the divisor AUDF+1 (1-256)
+                    clra
+                    addd      #1
+                    pshs      cc                  the unit is shared: masked for the sequence
+                    orcc      #$50
+                    std       CP.DVSR
+                    ldd       #SNFDIV
+                    std       CP.DVND
+                    ldd       CP.QUOT
+                    puls      cc
+                    std       SNDF,u              the noise's frequency
+                    lda       1,y
+                    anda      #$E0
+                    cmpa      #$A0
+                    beq       so4
+                    cmpa      #$E0
+                    beq       so4
+                    lda       #$81                noise, gated
+                    bra       so5
+so4                 ldd       SNDF,u              a pure tone: 8 times, held to $FFFF
+                    cmpd      #$2000
+                    blo       so4a
+                    ldd       #$FFFF
+                    bra       so4b
+so4a                lslb
+                    rola
+                    lslb
+                    rola
+                    lslb
+                    rola
+so4b                std       SNDF,u
+                    lda       #$41                pulse, gated
+so5                 sta       SNDCT,u
+                    ldx       SNDBAS,u
+                    ldb       SNDV,u
+                    lbsr      SidReg              Y = the voice's registers
+                    leax      SNDVF,u             the frequency, if it changed
+                    lslb
+                    abx
+                    ldd       SNDF,u
+                    cmpd      ,x
+                    beq       so6
+                    std       ,x
+                    stb       0,y
+                    sta       1,y
+so6                 ldb       SNDV,u              X = its control shadow, 6,X its sustain's
+                    leax      SNDVC,u
+                    abx
+                    lda       ,x
+                    cmpa      SNDCT,u
+                    bne       sotr                gated off, or another waveform: gate it
+                    lda       SNDSR,u
+                    cmpa      6,x
+                    beq       sonx
+                    bhi       sotr                louder: the envelope needs a new gate
+                    sta       6,x                 softer: the sustain follows down
+                    sta       6,y
+                    bra       sonx
+sotr                lda       ,x
+                    bita      #$01
+                    beq       sotr2
+                    anda      #$FE                gate off first, long enough to be seen
+                    sta       4,y
+                    ldb       #40                 25 us
+sotr1               decb
+                    bne       sotr1
+sotr2               lda       SNDSR,u
+                    sta       6,x
+                    sta       6,y
+                    lda       SNDCT,u
+                    sta       ,x
+                    sta       4,y
+sonx                inc       SNDCH,u
+                    lda       SNDCH,u
+                    cmpa      #8
+                    lblo      so1
+                    lbra      SidOff
+sox                 rts
+* channel c is silent: its voice, if it has one, gated off and freed
+soff                ldb       SNDCH,u
+                    leax      SNDCHV,u
+                    lda       b,x
+                    cmpa      #$FF
+                    beq       sonx
+                    pshs      a
+                    ldb       SNDCH,u
+                    lda       #$FF
+                    sta       b,x
+                    leax      SNDVCH,u
+                    ldb       ,s
+                    sta       b,x
+                    puls      b
+                    ldx       SNDBAS,u
+                    lbsr      SidReg
+                    leax      SNDVC,u
+                    abx
+                    lda       ,x
+                    anda      #$FE
+                    cmpa      ,x
+                    beq       sonx
+                    sta       ,x
+                    sta       4,y
+                    bra       sonx
+
+                    ifdef     TSND                (make EXTRA="-DTSND"; tools/sndtest.py builds it)
+********************************************************************
+* TsMain - tsnd, the sound test (plan stage 4): "tempest s".  The text screen
+*   stays; each pass runs the virtual IRQs' MODSND and SndOut, and
+*   the keys start sounds (FSNDON, as the game's calls do):
+*     0-9 a b c  sound 0-12      r  the sequence      x  stop      q  quit
+*   The sequence plays each sound alone for 2.5 s, then thrust in the
+*   tube with fire, and pulsation with an explosion, 4 s each: the
+*   same steps as tools/sndref.lua records from the arcade in MAME.
+********************************************************************
+TsMain              lbsr      INISOU              ALSOUN's own start
+                    lbsr       TsStop
+                    lbsr      SndInit
+                    lbcs      Quit
+                    leax      TsHelp,pcr
+                    ldy       #TsHlpL
+                    lda       #1
+                    os9       I$Write
+ts1                 ldx       #2                  one tick
+                    os9       F$Sleep
+                    tst       SIGCODE,u
+                    lbne      Done
+                    ldd       PASSES,u
+                    addd      #1
+                    std       PASSES,u
+                    ldd       VACC,u              the virtual IRQs this tick owes: MODSND's
+                    addd      #VIRQN
+                    std       VACC,u
+ts2                 ldd       VACC,u
+                    subd      #VIRQD
+                    blo       ts3
+                    std       VACC,u
+                    lbsr      MODSND
+                    bra       ts2
+ts3                 tst       TSRUN,u             the sequence's next step, when due
+                    beq       ts4
+                    dec       TSTIM,u
+                    bne       ts4
+                    bsr       TsNext
+ts4                 lbsr      SndOut
+                    clra                          a key?
+                    ldb       #SS.Ready
+                    os9       I$GetStt
+                    lbcs       ts1
+                    leax      TSKEY,u
+                    ldy       #1
+                    clra
+                    os9       I$Read
+                    lbcs       ts1
+                    lda       TSKEY,u
+                    ora       #$20                (letters to lower case)
+                    cmpa      #'q
+                    lbeq      Done
+                    cmpa      #'x
+                    bne       ts5
+                    clr       TSRUN,u
+                    bsr       TsStop
+                    lbra       ts1
+ts5                 cmpa      #'r
+                    bne       ts6
+                    clr       TSSEQ,u
+                    inc       TSRUN,u
+                    bsr       TsNext
+                    lbra       ts1
+ts6                 suba      #'0
+                    cmpa      #9
+                    bls       ts7
+                    suba      #'a-'0-10
+                    cmpa      #10
+                    lblo       ts1
+                    cmpa      #12
+                    lbhi       ts1
+ts7                 bsr       TsFire
+                    lbra       ts1
+
+* TsFire - A = sound 0-12: FSNDON with its number, k * 16 + $0F.
+TsFire              lsla
+                    lsla
+                    lsla
+                    lsla
+                    ora       #$0F
+                    lbra      FSNDON
+
+* TsStop - every sound stopped where MODSND would go on with it (all
+*   16 of POINT and CURREN: INISOU clears only the first 8), the image
+*   silent.  SndOut then gates every voice off.
+TsStop              leax      POINT,u
+                    ldb       #16
+tsp1                clr       ,x
+                    clr       CURREN-POINT,x
+                    clr       POKIMG-POINT,x
+                    leax      1,x
+                    decb
+                    bne       tsp1
+                    rts
+
+* TsNext - the sequence's next step: stop, then its sounds.
+TsNext              ldb       TSSEQ,u
+                    leax      TsStps,pcr
+                    abx
+                    lda       ,x
+                    beq       tsn2                the end
+                    sta       TSTIM,u
+                    addb      #3
+                    stb       TSSEQ,u
+                    ldd       1,x
+                    pshs      b
+                    pshs      a
+                    bsr       TsStop
+                    puls      a
+                    bsr       TsFire
+                    puls      a
+                    cmpa      #$FF
+                    beq       tsn1
+                    bsr       TsFire
+tsn1                rts
+tsn2                clr       TSRUN,u
+                    bra       TsStop
+
+* the steps: ticks, a sound, a second sound ($FF: none)
+TsStps               fcb       150,0,$FF,150,1,$FF,150,2,$FF,150,3,$FF,150,4,$FF
+                    fcb       150,5,$FF,150,6,$FF,150,7,$FF,150,8,$FF,150,9,$FF
+                    fcb       150,10,$FF,150,11,$FF,150,12,$FF
+                    fcb       240,6,2,240,3,1
+                    fcb       0
+
+TsHelp              fcc       "tsnd: 0-9 a-c sounds, r sequence, x stop, q quit"
+                    fcb       C$CR,C$LF
+TsHlpL              equ       *-TsHelp
+                    endc

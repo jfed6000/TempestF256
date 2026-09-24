@@ -7,11 +7,21 @@
 ********************************************************************
 * start - U = the data area, DP = its page (OS-9)
 ********************************************************************
-start               tfr       u,x                 clear the data area below the stack
+start
+                    ifdef     TSND
+                    lda       ,x                  the parameters' first character (above StkBase)
+                    pshs      a
+                    endc
+                    tfr       u,x                 clear the data area below the stack
                     ldy       #StkBase
 st1                 clr       ,x+
                     leay      -1,y
                     bne       st1
+                    ifdef     TSND
+                    puls      a
+                    ora       #$20                (lower case)
+                    sta       TSMODE,u
+                    endc
                     tfr       u,d                 the pseudo-registers' pointers: the data
                     sta       <RXP                area's page, the low byte the 6502 register
                     sta       <RYP
@@ -24,7 +34,7 @@ st1                 clr       ,x+
                     lda       #FX_OMIT
                     sta       MCRHI,u
                     clra                          path 0
-                    ldb       #SS.DScrn
+                    ldb       #SS.MCR
                     os9       I$GetStt
                     lbcs      Quit
                     tfr       x,d
@@ -36,10 +46,17 @@ st1                 clr       ,x+
                     lbsr      AWinInit            window A: vector RAM, records, texts
                     lbcs      Quit
                     lbsr      RELINI              the address tables (reloc.a), after VWIN
+                    ifdef     TSND
+                    lda       TSMODE,u            "tempest s": the sound test instead (sound.a)
+                    cmpa      #'s
+                    lbeq      TsMain
+                    endc
                     lbsr      GfxInit             bitmaps, CLUT, layers, display
                     lbcs      Quit
                     lbsr      InInit              the mouse, if SS.MsDelta answers
+                    lbsr      SndInit             the SIDs (a failure leaves the game silent)
                     lbsr      GamInit             the arcade's reset, less its self-test
+                    lbsr      SolOn               the clock: SOLdrv's signal at every frame
                     leax      T0BUF,u             the time the loop starts (the sign-off's numbers)
                     os9       F$Time
                     lbra      MainLoop            frame.a
@@ -136,7 +153,9 @@ u1x                 rts
 * Cleanup - every exit path: the mouse, the signals, the display, the
 *   windows, the sign-off, the terminal's options
 ********************************************************************
-Cleanup             lbsr      InExit              the mouse back to pointer mode
+Cleanup             lbsr      SolOff              no more signals
+                    lbsr      SndExit             the SIDs silent (before the window goes)
+                    lbsr      InExit              the mouse back to pointer mode
                     lbsr      WSigClr             stop the driver signalling a dead process
                     lbsr      GfxExit
                     leax      SWIN,u
@@ -165,12 +184,20 @@ cu1                 lbsr      ExitMsg             clear the screen and sign off
 *   away is not owed as virtual IRQs: the game stood still.  A frame's
 *   drawing that was under way goes on where it stopped.
 ********************************************************************
-PausWt              ldx       #30
+PausWt              lbsr      SndExit             silent while hidden (SndInit again on the way back)
+                    ldx       #1                  and no ticks (SOLdrv's mute)
+                    lbsr      SolMute
+pw1                 ldx       #30
                     os9       F$Sleep
                     tst       SIGCODE,u
                     lbne      Done
                     tst       PAUSED,u
-                    bne       PausWt
+                    bne       pw1
+                    ldx       #0                  the ticks again, from now: the game stood still
+                    lbsr      SolMute
+                    ldd       TICKS,u
+                    std       TSEEN,u
+                    lbsr      SndInit
                     leax      CLRSHD,u
                     leay      CLSENT,u
                     ldb       #16
@@ -206,7 +233,13 @@ WSigClr             clra                          path 0
 *   not relied on).  Keyboard abort and interrupt end the program; the
 *   window signals pause and resume it; the rest are ignored.
 ********************************************************************
-Icpt                cmpb      #S$WinBg            our terminal was hidden?
+Icpt                cmpb      #SIGTK              SOLdrv's line 0: a tick
+                    bne       ic0
+                    ldd       TICKS,u
+                    addd      #1
+                    std       TICKS,u
+                    rti
+ic0                 cmpb      #S$WinBg            our terminal was hidden?
                     bne       ic1
                     stb       PAUSED,u
                     rti
@@ -220,6 +253,50 @@ ic2                 cmpb      #S$Abort
                     bhi       icx
                     stb       SIGCODE,u
 icx                 rti
+
+********************************************************************
+* SolOn / SolOff / SolMute - the clock from SOLdrv (/fSOL, in the boot
+*   file; as CMDS/scfg uses it): signal SIGTK to us at line SOLLN of
+*   every frame, 60 a second (Icpt counts TICKS).  No /fSOL, or an
+*   error: SOLPTH stays 0 and the loop keeps one pass a tick.  SolMute:
+*   X = 1 mute, 0 unmute.  A, B, X, Y clobbered.
+********************************************************************
+SIGTK               equ       $A2                 our tick signal (above 128: the user's)
+SOLLN               equ       0                   the frame's line 0: the tick itself
+SolOn               lda       #UPDAT.+SHARE.
+                    leax      SolNam,pcr
+                    os9       I$Open
+                    bcs       slx
+                    sta       SOLPTH,u
+                    ldx       #SOLLN
+                    ldy       #SIGTK
+                    ldb       #SS.SOLIRQ
+                    os9       I$SetStt
+                    bcc       sl1
+                    lda       SOLPTH,u
+                    os9       I$Close
+                    clr       SOLPTH,u
+slx                 rts
+sl1                 ldd       TICKS,u
+                    std       TSEEN,u
+                    rts
+SolOff              lda       SOLPTH,u
+                    beq       slx
+                    ldx       #SOLLN
+                    ldy       #0                  signal 0: removed
+                    ldb       #SS.SOLIRQ
+                    os9       I$SetStt
+                    lda       SOLPTH,u
+                    os9       I$Close
+                    clr       SOLPTH,u
+                    rts
+SolMute             lda       SOLPTH,u
+                    beq       slx
+                    ldb       #SS.SOLMUTE
+                    os9       I$SetStt
+                    rts
+SolNam              fcc       "/fSOL"
+                    fcb       C$CR
 
 ********************************************************************
 * OptSet / OptRestore - path 0 without echo, and without any character
@@ -289,6 +366,9 @@ em1                 lda       #1                  stdout
                     bsr       Stats
                     lda       #1
                     os9       I$Write
+                    lbsr      Stats2
+                    lda       #1
+                    os9       I$Write
 emx                 rts
 
 ********************************************************************
@@ -348,6 +428,29 @@ ss1                 lda       #60
                     tfr       d,y
                     rts
 
+* Stats2 - "LLLLL line calls, KKKKK short, DDDDD dropped": the SS.BmLine
+*   calls, those the line FIFO's room cut short (gfx.a BmSend), and the
+*   drawings dropped behind a long one (frame.a).  X = the line, Y its length.
+Stats2              leay      STLINE,u
+                    ldd       LNCALL,u
+                    bsr       Dec5
+                    leax      StTx4,pcr
+                    bsr       StCpy
+                    ldd       LNSHRT,u
+                    bsr       Dec5
+                    leax      StTx5,pcr
+                    bsr       StCpy
+                    ldd       DROPS,u
+                    bsr       Dec5
+                    leax      StTx6,pcr
+                    bsr       StCpy
+                    tfr       y,d
+                    leax      STLINE,u
+                    pshs      x
+                    subd      ,s++
+                    tfr       d,y
+                    rts
+
 * StCpy - the text at X (ended by 0) to Y+
 StCpy               lda       ,x+
                     beq       scx
@@ -394,4 +497,10 @@ StTx1               fcc       / game frames,/
 StTx2               fcc       / passes in/
                     fcb       0
 StTx3               fcc       / s/
+                    fcb       $0D,$0A,0           (I$Write: a CR alone returns on the same row)
+StTx4               fcc       / line calls,/
+                    fcb       0
+StTx5               fcc       / short,/
+                    fcb       0
+StTx6               fcc       / dropped/
                     fcb       $0D,0

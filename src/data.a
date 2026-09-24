@@ -50,19 +50,66 @@ TXROFS               rmb       2                   text.a: the row's offset in i
 TXBK                rmb       1                   text.a: the row's block in the bitmap
 TXSKP               rmb       1                   text.a: pixels cut on the left
 TXPIX               rmb       1                   text.a: pixels drawn a row
+TXPAR               rmb       1                   text.a: the first dot's half of its byte (0 = left, high)
+TXCLH               rmb       1                   text.a: TXCLR << 4, the left dot's nibble
 TXNR                rmb       1                   text.a: rows left
 FLSHN               rmb       1                   AvgFlush: tries left while the FIFO is full
 
+* sound (sound.a): the SIDs' six voices and the POKEYs' eight channels
+SNDVCH              rmb       6                   a voice's channel ($FF: free); SNDCHV must follow
+SNDCHV              rmb       8                   a channel's voice ($FF: none)
+SNDVC               rmb       6                   a voice's control register as written; SNDVS, SNDVF follow
+SNDVS               rmb       6                   its sustain/release register as written
+SNDVF               rmb       12                  its frequency as written (high, low)
+SNDUP               rmb       1                   non-zero: SndInit ran (SndExit silences)
+SNDBAS              rmb       2                   SndOut: the left SID's logical address
+SNDCH               rmb       1                   SndOut: the channel
+SNDV                rmb       1                   SndOut: its voice
+SNDSR               rmb       1                   SndOut: the sustain/release wanted
+SNDF                rmb       2                   SndOut: the frequency wanted
+SNDCT               rmb       1                   SndOut: the control register wanted
+SNDCC               rmb       1                   SidOn: CC as found (the interrupt mask)
+SNDF0               rmb       1                   SidOn: the MMU's control register as found
+SNDSL               rmb       1                   SidOn: window A's slot
+SNDOB               rmb       1                   SidOn: the block it held
+TSMODE              rmb       1                   the first character of the parameters ('s': tsnd)
+TSRUN               rmb       1                   tsnd: the sequence is playing
+TSSEQ               rmb       1                   tsnd: its next step (offset in TsSeq)
+TSTIM               rmb       1                   tsnd: ticks left in this step
+TSKEY               rmb       1                   tsnd: the key read
+GFXON               rmb       1                   non-zero: GfxInit ran (GfxExit undoes it)
+
+* the line sends (gfx.a BmSend) and the well (WellCom)
+BSBM                rmb       1                   BmSend: the bitmap
+WLST                rmb       1                   non-zero: the well is in the back layer (WLOLD as drawn)
+WLSTB               rmb       1                   frames its geometry has held, with the lines
+WLON                rmb       1                   WLOLD's records
+WLN                 rmb       1                   this frame's (AV.WNC)
+WLSAM               rmb       1                   non-zero: this frame's geometry is WLOLD's
+WLK                 rmb       1                   scratch: records picked
+WLI                 rmb       1                   scratch: records left
+WLT                 rmb       1                   scratch
+WLE0                rmb       1                   WlRows: the first row erased
+WLE1                rmb       1                   and the last
+WLNEW               rmb       2                   window A + $1E00: this frame's well (avg.a)
+WLDST               rmb       2                   scratch: where the next picked record goes
+TXALL               rmb       1                   non-zero: TxCommit draws every entry again
+WLDONE              rmb       1                   non-zero: AvgLast added the well's off-colour records to the batch
+WLOLD               rmb       56*8                the well as last seen (avg.a WMAX records)
+
 * the frame loop
-WORK                rmb       2                   this pass's budget left, estimated microseconds (Spend)
-DRAWNG              rmb       1                   non-zero: a frame's drawing is under way
-MAINSP              rmb       2                   the main loop's S while the drawing runs
-DRWSP               rmb       2                   the drawing's S while the loop runs
-DRWSTL              equ       384                 the drawing's stack, its size
-DRWSTK              rmb       DRWSTL              the drawing's stack (frame.a)
+DRPEND              rmb       1                   non-zero: a frame's logic ran; the next pass draws it
+DRWT0               rmb       2                   TICKS when this frame's drawing began
 VACC                rmb       2                   the virtual IRQ's Bresenham accumulator (frame.a)
-GFRAMS              rmb       2                   game frames run
+GFRAMS              rmb       2                   game frames run (their logic; drawn or dropped)
+DROPS               rmb       2                   drawings dropped (the sign-off)
+SKIPNX              rmb       1                   non-zero: the next frame's drawing is dropped
 PAUSED              rmb       1                   non-zero = our terminal is a shadow (SS.WSig S$WinBg)
+SOLPTH              rmb       1                   SOLdrv's path (0: none; one pass a tick)
+TICKS               rmb       2                   ticks counted by the signal (Icpt)
+TSEEN               rmb       2                   TICKS as the last pass took them
+TKNOW               rmb       2                   TICKS read this pass
+TKN                 rmb       1                   the ticks this pass runs (1-TKMAX)
 SIGCODE             rmb       1                   abort/interrupt signal received (0 = none)
 
 * input (input.a)
@@ -71,6 +118,8 @@ KNBPND              rmb       2                   counts not yet given to a virt
 BUTTNS              rmb       1                   ALLPO2's active-high buttons (zap, fire, starts)
 COINTM              rmb       1                   virtual IRQs the coin switch stays closed
 MOUSE               rmb       1                   non-zero: SS.MsDelta answers (counts mode set)
+JOYON               rmb       1                   non-zero: stick 0 has been used (read every pass)
+JOYCNT              rmb       1                   passes to the next look while it has not
 KBLAST              rmb       6                   last pass's held keys (new-press detection)
 QUITKEY             rmb       1                   Q was pressed
 EXITST              rmb       1                   exit status, for the sign-off
@@ -81,6 +130,8 @@ TIMBUF              rmb       6                   F$Time's packet (the RANDOM se
 T0BUF               rmb       6                   F$Time at the first pass (the sign-off's numbers)
 PASSES              rmb       2                   passes of the frame loop (one a tick, if none ran long)
 STLINE              rmb       48                  the sign-off's numbers, as text
+LNCALL              rmb       2                   SS.BmLine calls (gfx.a BmSend), for the sign-off
+LNSHRT              rmb       2                   of them, returned short: the line FIFO's room ran out
 
 StkBase             equ       $1C00               the stack: the top 1K (as Joust), with OS-9's parameters
                     ifgt      .-StkBase

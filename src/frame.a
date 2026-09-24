@@ -2,91 +2,132 @@
 * frame.a - the frame loop: the arcade's IRQ and MAINLN on the 60 Hz
 *   tick (docs/port-plan.md section 2, decision D7).
 *
-*   ONE PASS A TICK, AS JOUST.  Each pass sleeps to the next tick and
-*   runs the virtual IRQs that tick owes: the arcade's IRQ is 12.096 MHz
-*   / 4096 / 12 = 246.09375 Hz, exactly 525/128 of the tick, so each
-*   pass adds 525 to VACC and runs one virtual IRQ (VirIRQ: the input
-*   shadows, then ALHAR2's IRQ, which runs MOOLAH, MODSND and FRTIMR)
-*   for each 128 it holds.  Passes count the ticks, so NO PASS MAY RUN
-*   PAST ITS TICK: one that does loses a tick, and the game's clock,
-*   its sound and its timers fall behind by that much.
+*   THE CLOCK IS SOLdrv's (platform.a SolOn): a signal at line 0 of
+*   every frame counts TICKS, and each pass runs the virtual IRQs of the
+*   ticks since the last: the arcade's IRQ is 12.096 MHz / 4096 / 12 =
+*   246.09375 Hz, exactly 525/128 of the tick, so a tick adds 525 to
+*   VACC and a virtual IRQ (VirIRQ: the input shadows, then ALHAR2's
+*   IRQ, which runs MOOLAH, MODSND and FRTIMR) runs for each 128 it
+*   holds.  A pass that runs long is caught up, not lost, as the
+*   arcade's IRQ keeps real time whatever its AVG does.  (Without /fSOL:
+*   one pass a tick, F$Sleep X=2, and a long pass loses its ticks.)
 *
-*   So the game frame is split across passes.  When FRTIMR reaches 9
-*   (the arcade's MAINLN rule), a pass runs the game's logic (GamLog:
-*   the clear, EXSTAT, NONSTA, DISPLA, 10-13 ms) and starts the drawing,
-*   which gives the tick back at once; the drawing (Draw: AvgRun into the hidden bitmap, the
-*   flip, the CLUT, the text) runs as a coroutine on a stack of its own
-*   and gives the tick back whenever the pass's budget (WORK, estimated
-*   microseconds) would not cover its next step (Spend).  A game frame
-*   whose drawing is not done when FRTIMR next reaches 9 starts late,
-*   as the arcade's own frames do when they overrun.
+*   A GAME FRAME IS TWO PASSES.  When FRTIMR reaches 9 (the arcade's
+*   MAINLN rule), a pass runs the game's logic (GamLog: the clear armed,
+*   EXSTAT, NONSTA, DISPLA); the next pass draws it whole (Draw: AvgRun
+*   into the hidden bitmap, the flip, the CLUT, the text).  The drawing
+*   is never split: with the clock caught up, splitting only cost frames
+*   (docs/status.md, "The SOL clock").  It always comes a tick after the
+*   clear was armed, which by then has run.  A drawing SKIPT ticks or
+*   longer drops the next frame's drawing (the attract logo).
 ********************************************************************
 
 VIRQN               equ       525                 virtual IRQs a tick, times VIRQD
 VIRQD               equ       128
-* the budgets, in estimated microseconds (tools/osrun.py measures the passes they give)
-                    ifndef    BUDPAS
-BUDPAS              equ       12500               a drawing pass: the tick less the sleep, the IRQs, input and a margin
+TKMAX               equ       32                  ticks a pass catches up at most (a superzapper blast: ~15)
+SKIPT               equ       5                   a drawing this many ticks long drops the next one
+                    ifndef    HIRES
+HIRES               equ       1                   the line bitmaps 640x240 (gfx.a; branch hires640)
                     endc
-BUDLOG              equ       0                   what a logic pass leaves for the drawing: nothing, since
-*                                                 the logic itself runs 9.7 to 12.6 ms (osrun.py)
-* what a step costs, for Spend (estimated: the interpreter ~105 us a record on the host 6809, the
-* driver 474 us a call and 27.5 a record by the count of its instructions; tline S will say)
-                    ifndef    RECUS
-RECUS               equ       160                 a record, interpreted and drawn (more than 128: gfx.a NxtBat)
+AVCOLL              equ       1                   small shapes collapsed (avg.a AvShp; status.md "Small shapes collapsed")
+AVWELL              equ       1                   the well drawn once into the back layer (gfx.a WellCom)
+LOGOQK              equ       1                   the logo's quiet end shortened (alsco2.a LOGPRO): the
+LOGMS               equ       4                   trail closes 4 a frame once the front arrives (Atari: 1),
+LOGHD               equ       90                  and the merged logo holds 90 game frames (~4 s at 21 a second)
+                    ifndef    LOGSKP
+LOGSKP              equ       2                   every other copy of the attract logo not drawn (avg.a)
                     endc
-RECK                equ       32768/RECUS         NxtBat's multiplier: records = (D / 128) * RECK / 256
-CALLUS              equ       474                 an SS.BmLine call
-MINREC              equ       8                   the smallest batch worth a call
-MINBUS              equ       MINREC*RECUS+CALLUS the smallest next batch
-FLIPUS              equ       1500                the flip and the CLUT, typically
-GLYUS               equ       1000                a glyph erased or drawn: this, and ROWUS a row (text.a);
-ROWUS               equ       60                  measured 370-1,470 us, a remap of the window included
-TXMUS               equ       1500                text.a TxMatch, the lists compared (148 entries: ~1.1 ms)
 
-MainLoop            ldx       #2                  wait for the next tick (X = 1 only gives up the time slice)
+* The clock (platform.a SolOn): with SOLdrv, a signal at line 0 of every
+*   frame counts TICKS, and a pass runs the virtual IRQs of every tick
+*   since the last (TKMAX at most): a pass that ran long is caught up,
+*   not lost, as the arcade's IRQ keeps real time whatever the AVG does.
+*   Without it, one pass a tick, as before (F$Sleep X=2).
+MainLoop            tst       SOLPTH,u
+                    beq       mlt
+mls                 ldd       TICKS,u             the ticks since the last pass
+                    std       TKNOW,u
+                    subd      TSEEN,u
+                    bne       mln
+                    ldx       #0                  none yet: sleep until a signal
                     os9       F$Sleep
-                    ldd       PASSES,u            (the sign-off reports them)
+                    tst       SIGCODE,u
+                    lbne      Done
+                    bra       mls
+mln                 cmpd      #TKMAX
+                    bls       mlk
+                    ldd       #TKMAX              (a long stall: not all of it)
+mlk                 stb       TKN,u
+                    ldd       TKNOW,u
+                    std       TSEEN,u
+                    bra       mlp
+mlt                 ldx       #2                  wait for the next tick (X = 1 only gives up the time slice)
+                    os9       F$Sleep
+                    lda       #1
+                    sta       TKN,u
+mlp                 ldd       PASSES,u            (the sign-off reports them)
                     addd      #1
                     std       PASSES,u
                     tst       SIGCODE,u
                     lbne      Done
                     tst       PAUSED,u
                     lbne      PausWt
-                    ldb       #1                  one tick
+                    ldb       TKN,u               the ticks
                     lbsr      InFram              the keys, the stick, the mouse (input.a)
                     tst       QUITKEY,u
                     lbne      Done
-                    ldd       VACC,u              the virtual IRQs this tick owes
-                    addd      #VIRQN
-                    std       VACC,u
+                    ldb       TKN,u               the virtual IRQs those ticks owe
+mlv                 ldx       VACC,u
+                    leax      VIRQN,x
+                    stx       VACC,u
+                    decb
+                    bne       mlv
 ml1                 ldd       VACC,u
                     subd      #VIRQD
                     blo       ml2
                     std       VACC,u
                     lbsr      VirIRQ
                     bra       ml1
-ml2                 ldd       #BUDPAS
-                    std       WORK,u
-                    tst       DRAWNG,u            a frame's drawing under way: go on with it
-                    bne       ml3
+ml2                 lbsr      SndOut              the POKEY image onto the SIDs (sound.a)
+                    tst       DRPEND,u            a frame's logic ran in an earlier pass: draw it
+                    bne       mld
                     lda       <FRTIMR             the arcade's MAINLN: a game frame once 9 have run
                     cmpa      #9
-                    blo       MainLoop
+                    lblo      MainLoop
                     lbsr      GamLog
-                    ldd       #BUDLOG
-                    std       WORK,u
-                    lbsr      DrwBeg
-                    bra       MainLoop
-ml3                 lbsr      DrwRes
-                    bra       MainLoop
+                    ldd       GFRAMS,u            (the game's frames: its pace, drawn or not)
+                    addd      #1
+                    std       GFRAMS,u
+                    tst       SKIPNX,u            the last drawing ran long: this frame is not drawn
+                    beq       mlq
+                    clr       SKIPNX,u
+                    ldd       DROPS,u
+                    addd      #1
+                    std       DROPS,u
+                    ifdef     AVWELL
+                    clr       AVGPG+AV.CVAL,u     (the well may be rebuilt twice unseen: its cache goes)
+                    endc
+                    lbra      MainLoop
+mlq                 inc       DRPEND,u            drawn in the next pass, a tick on: the clear has run
+                    lbra      MainLoop
+mld                 clr       DRPEND,u
+                    ldd       TICKS,u
+                    std       DRWT0,u
+                    bsr       Draw
+DrwEnd              ldd       TICKS,u             the frame is drawn (tools/osrun.py checks it here)
+                    subd      DRWT0,u             SKIPT ticks or more: the next frame's drawing is
+                    cmpd      #SKIPT              dropped, so the game keeps closer to its pace
+                    blo       mlx                 (the attract logo: 19 copies, ~6 ticks a drawing)
+                    inc       SKIPNX,u
+mlx                 lbra      MainLoop
 
 ********************************************************************
 * GamLog - a game frame's logic: MAINLN's three calls.  The hidden line
 *   bitmap's clear is armed first (BmArm): the DMA engine runs it in
-*   the next vertical blank, before the drawing's first pass, which
-*   checks (Draw, BmWait).  Waiting for it here cost the rest of the
-*   tick (docs/port-plan.md D9: double buffer).
+*   the next vertical blank, with the CPU halted until it is done, so
+*   the drawing, a pass (a tick) later, finds it clear without asking
+*   (BmWait's GetStat went, docs/status.md).  Waiting for it here cost
+*   the rest of the tick (docs/port-plan.md D9).
 ********************************************************************
 GamLog              clr       <FRTIMR             ALEXEC:53 LDA I,0 / STA FRTIMR
                     lda       SHOWN,u
@@ -96,64 +137,20 @@ GamLog              clr       <FRTIMR             ALEXEC:53 LDA I,0 / STA FRTIMR
                     lbsr      NONSTA
                     lbra      DISPLA
 
-********************************************************************
-* The drawing, a coroutine.
-*
-*   DrwBeg - start it: the main loop's S to MAINSP, S to DRWSTK; Draw.
-*     Returns to the loop when Draw finishes, or when it Spends past the
-*     pass's budget (DRAWNG then says it is not done).
-*   DrwRes - go on with it from where Spend left it.
-*   Spend - D = what the step just done cost, X = what the next step
-*     will cost (estimated microseconds): charge the first to WORK and,
-*     when WORK will not cover the second, give the tick back.  Every
-*     register but S is kept across it; U must be the data area.  Only
-*     the drawing calls it.
-********************************************************************
-DrwBeg              sts       MAINSP,u
-                    leas      DRWSTK+DRWSTL,u
-                    inc       DRAWNG,u
-                    bsr       Draw
-                    clr       DRAWNG,u
-                    ldd       GFRAMS,u
-                    addd      #1
-                    std       GFRAMS,u
-DrwEnd              lds       MAINSP,u            the frame is drawn (tools/osrun.py checks it here)
-                    rts
-
-DrwRes              sts       MAINSP,u
-                    lds       DRWSP,u
-                    puls      cc,a,b,dp,x,y,u,pc  back into Spend's caller
-
-Spend               pshs      cc,a,b,dp,x,y,u
-                    pshs      d
-                    ldd       WORK,u
-                    subd      ,s++
-                    std       WORK,u
-                    pshs      x
-                    cmpd      ,s++                enough left for the next step?
-                    bge       sp1
-                    sts       DRWSP,u             no: the loop has the rest of the tick
-                    lds       MAINSP,u
-                    rts                           (as if DrwBeg or DrwRes returned)
-sp1                 puls      cc,a,b,dp,x,y,u,pc
-
 * Draw - the list into the hidden bitmap, shown; then the colours and the
-*   text, which are single-buffered
-Draw                ldd       #0                  room for the first batch?
-                    ldx       #MINBUS
-                    bsr       Spend
-                    lbsr      BmWait              the clear GamLog armed has run
-                    lbsr      NxtBat              its size, from the budget
-                    lbsr      AvgRun              records to AvgFlush (gfx.a), which Spends
-                    ldd       #0                  room for the flip and the CLUT?
-                    ldx       #FLIPUS
-                    bsr       Spend
+*   text, which are single-buffered.  In one pass.
+Draw
+                    ifdef     AVWELL
+                    lda       #1                  the well's records captured (avg.a)
+                    sta       AVGPG+AV.WENA,u
+                    endc
+                    lbsr      AvgRun              records to AvgFlush (gfx.a), in batches of 255
+                    ifdef     AVWELL
+                    lbsr      WellCom             the well: the back layer, or with the lines (gfx.a)
+                    endc
                     lbsr      Flip
                     lbsr      ClutCommit
-                    ldd       #FLIPUS
-                    ldx       #TXMUS+GLYUS+11*ROWUS room for the text's match and the biggest glyph?
-                    bsr       Spend
-                    lbra      TxCommit            which Spends a glyph at a time
+                    lbra      TxCommit
 
 ********************************************************************
 * VirIRQ - one virtual IRQ: the switches into the shadows the IRQ reads

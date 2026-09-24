@@ -12,7 +12,7 @@ AS          = lwasm.orig --6809 --format=os9 \
               --includedir=$(NITROS9DIR)/defs -I $(NITROS9DIR)/level2/wildbits -I . -Dwildbits=1 $(EXTRA)
 PROGS       = tempest
 # every source the module includes: a file missing here is not rebuilt (make sees no change)
-SOURCES     = tempest.asm data.a platform.a frame.a input.a gfx.a text.a avg.a avgtab.a glyphs.a \
+SOURCES     = tempest.asm data.a platform.a frame.a input.a gfx.a text.a sound.a avg.a avgtab.a glyphs.a \
               alwelg.a alsco2.a aldis2.a alexec.a alsoun.a alvrom.a alcoin.a allang.a alhar2.a \
               alearo.a alvgut.a stubs.a hw.a reloc.a port.d arcade.d vrom.bin \
               $(NITROS9DIR)/defs/wildbits.d

@@ -4,9 +4,11 @@
 *
 *   Bitmaps 0 and 1 are the lines, double-buffered (docs/port-plan.md
 *   D9): SHOWN on layer 1, the other cleared and drawn each game frame,
-*   then shown.  Bitmap 2 is the text (D3), on layer 0 in front, drawn
-*   by text.a only where the text changes.  Layer 2 is tile map 0, and
-*   tile maps are off in the display mode, so it shows nothing.
+*   then shown.  Bitmap 2 is the text (D3), on layer 2 at the back
+*   (behind the lines, so a line crossing text covers it, and the back
+*   layer can hold what does not change: the well, next), drawn by
+*   text.a only where the text changes.  Layer 0, in front, is tile map
+*   0, and tile maps are off in the display mode, so it shows nothing.
 *
 *   One CLUT (0) for all three: entry colour * 16 + intensity (docs/
 *   port-tempest.md 4.3).  Entry 0 is transparent, which a clear bitmap
@@ -15,12 +17,20 @@
 ********************************************************************
 
 BMNBLK              equ       10                  blocks in a 320x240 bitmap
+* HIRES (branch hires640): the line bitmaps 0 and 1 are 640x240 at 4 bits
+*   a dot (SS.BmCfg HIRES4, the rc17 core), on CLUT 1: a record's X is
+*   doubled and its colour becomes nibble colour+1 (colour 15 shares 15),
+*   CLUT 1's entry n colour n-1 at intensity HIINT.  The interpreter still
+*   works in 320 (AvgFlush converts each batch); the text stays 320.
+HIINT               equ       12                  the intensity the 16 colours show at
+*   (HIRES itself is set in frame.a, whose budgets depend on it)
 
 ********************************************************************
 * GfxInit - bitmaps 0-2, cleared; the CLUT; the layers; the display on.
 *   Exit: carry = error in B
 ********************************************************************
-GfxInit             ldb       #0
+GfxInit             inc       GFXON,u             (GfxExit: undo it, even a part)
+                    ldb       #0
 gi1                 pshs      b
                     lbsr      AllocBm
                     puls      b
@@ -46,25 +56,52 @@ gi2                 lda       ,x+
                     bne       gi2
                     lbsr      ClutCommit
                     bcs       gix
-                    ldx       #0                  layer 0: the text
-                    ldy       #2
+                    ldx       #0                  layer 0, in front: tile map 0, off
+                    ldy       #4
                     bsr       Layer
                     bcs       gix
                     ldx       #1                  layer 1: the lines
                     ldy       #0
                     bsr       Layer
                     bcs       gix
-                    ldx       #2                  layer 2: tile map 0, off
-                    ldy       #4
+                    ldx       #2                  layer 2, at the back: the text
+                    ldy       #2
                     bsr       Layer
                     bcs       gix
+                    ifne      HIRES
+                    ldy       #0                  the line bitmaps: 640x240, CLUT 1, group 0
+                    bsr       BmHi
+                    bcs       gix
+                    ldy       #1
+                    bsr       BmHi
+                    bcs       gix
+                    ldy       #2                  the text too (text.a)
+                    bsr       BmHi
+                    bcs       gix
+                    endc
                     ldx       #FX_GRF+FX_BM       console text off, bitmaps only (the MCR's low byte)
                     ldy       #0                  320x240, 60 Hz
                     clra                          path 0
-                    ldb       #SS.DScrn
+                    ldb       #SS.MCR
                     os9       I$SetStt
 gix                 rts
 
+                    ifne      HIRES
+* BmHi - Y = bitmap #: SS.BmCfg HIRES4 on, CLUT 1, group 0, the enable
+*   left alone.  BmLo - back to 320x240 and CLUT 0 (on exit).  U kept;
+*   carry = error.
+BmHi                ldx       #$FF01
+                    pshs      u
+                    ldu       #$0100
+                    bra       bmcf
+BmLo                ldx       #$FF00
+                    pshs      u
+                    ldu       #$0000
+bmcf                clra                          path 0
+                    ldb       #SS.BmCfg
+                    os9       I$SetStt
+                    puls      u,pc
+                    endc
 * Layer - X = layer, Y = source (0-2 bitmap, 4-6 tile map).  Carry = error.
 Layer               clra                          path 0
                     ldb       #SS.Layer
@@ -92,7 +129,17 @@ flx                 rts
 * GfxExit - the display mode as it was, then the bitmaps allocated here
 *   freed (SS.FScrn).
 ********************************************************************
-GfxExit             lda       BMOWN,u
+GfxExit             tst       GFXON,u             never set up (tsnd): nothing to undo
+                    beq       gex
+                    ifne      HIRES
+                    ldy       #0
+                    bsr       BmLo
+                    ldy       #1
+                    bsr       BmLo
+                    ldy       #2
+                    bsr       BmLo
+                    endc
+                    lda       BMOWN,u
                     ldb       #0
 ge1                 lsra
                     bcc       ge2
@@ -112,9 +159,9 @@ ge2                 incb
                     ldb       MCRHI,u
                     tfr       d,y
                     clra
-                    ldb       #SS.DScrn
+                    ldb       #SS.MCR
                     os9       I$SetStt
-                    rts
+gex                 rts
 
 ********************************************************************
 * AllocBm - B = bitmap #: SS.AScrn 320x240 (one that exists already is
@@ -172,7 +219,7 @@ BmClr               ldb       #DmaWt.Poll<<DmaWt.Shift+1 poll until done, 16-bit
 *   (the DMA engine's WAIT_2_TRF), with the CPU halted while it runs.
 *   Mode 7 spent the rest of the frame waiting for that blank: a tick
 *   lost every game frame on the K2 (docs/status.md, "Optimising").
-*   Nothing may draw into the bitmap before BmWait says it is done.
+*   Nothing may draw into the bitmap before the next tick (GamLog).
 BmArm               ldb       #DmaWt.None<<DmaWt.Shift+1 arm and return, 16-bit
 bcgo                tst       NODMA,u
                     bne       BmClrCPU
@@ -213,48 +260,88 @@ bcok                clrb
 bcerr               leas      2,s
                     rts
 
-* BmWait - until the fill BmArm armed has run (GetStat SS.BmClear, R$X
-*   = 0 idle).  It has, by the next tick, so this normally asks once.
-*   Bounded: a fill that never ends latches NODMA and the CPU clears the
-*   hidden bitmap instead.  U kept (the call returns R$Y and R$U too,
-*   a diagnostic); A, B, X, Y clobbered.
-BmWait              tst       NODMA,u
-                    bne       bwx
-                    ldy       #2000
-bw1                 pshs      y,u
-                    clra                          path 0
-                    ldb       #SS.BmClear
-                    os9       I$GetStt            (R$Y and R$U return the DMA's destination)
-                    puls      y,u
-                    bcs       bwbad
-                    cmpx      #0
-                    beq       bwx
-                    leay      -1,y
-                    bne       bw1
-bwbad               inc       NODMA,u
-                    lda       SHOWN,u
-                    eora      #1
-                    lbra      BmClrCPU
-bwx                 rts
+* WlCv1 - the record at X into Y: 640 and a nibble, or with A non-zero
+*   the nibble 0 (an erase).  X and Y advance 8.  A, B clobbered.
+WlCv1               pshs      a
+                    ldd       ,x
+                    ifne      HIRES
+                    lslb
+                    rola
+                    endc
+                    std       ,y
+                    ldd       2,x
+                    ifne      HIRES
+                    lslb
+                    rola
+                    endc
+                    std       2,y
+                    ldd       4,x
+                    std       4,y
+                    tst       ,s
+                    bne       wv2
+                    ldb       6,x                 colour << 4 | intensity
+                    ifne      HIRES
+                    lsrb
+                    lsrb
+                    lsrb
+                    lsrb
+                    incb
+                    cmpb      #16
+                    blo       wv3
+                    ldb       #15
+                    endc
+                    bra       wv3
+wv2                 clrb
+wv3                 stb       6,y
+                    clr       7,y
+                    leax      8,x
+                    leay      8,y
+                    puls      a,pc
 
 ********************************************************************
 * AvgFlush - the interpreter's batch (avg.a): X = the records, B = the
-*   count (1-255), U = the data area, DP its page; may clobber all but
+*   count (1-255; with AVWELL 0-255, and AVGPG+AV.WCB records the well's
+*   capture took, interpreted but not in the batch, are charged too), U =
+*   the data area, DP its page; may clobber all but
 *   S.  SS.BmLine into the hidden bitmap until every record is drawn:
 *   the driver returns short when the line engine's FIFO lacks room.
 *   A call that draws none 20 times running, or an error (our terminal
 *   hidden), gives the batch up: a frame loses lines, nothing hangs.
-*   Each call is charged to the pass's budget (frame.a Spend), which may
-*   hand the tick back to the loop between calls.
 ********************************************************************
-AvgFlush            lda       #20
+AvgFlush            tstb                          (AVWELL: 0 when the batch held only the well's room)
+                    beq       afr
+                    ifne      HIRES
+                    pshs      b,x                 the batch into 640 and nibbles, in place, once
+                    pshs      b
+                    tfr       x,y
+hx1                 clra
+                    lbsr      WlCv1
+                    dec       ,s
+                    bne       hx1
+                    leas      1,s
+                    puls      b,x
+                    endc
+                    lda       SHOWN,u             into the hidden bitmap
+                    eora      #1
+                    sta       BSBM,u
+                    bra       BmSend
+afr                 rts
+
+* BmSend - X = records (640, nibbles), B = the count (1-255): SS.BmLine
+*   into bitmap BSBM until every record is drawn.  The driver returns
+*   short when the line engine's FIFO lacks
+*   room; a call that draws none 20 times running, or an error (our
+*   terminal hidden), gives up: lines lost, nothing hangs.  A, B, X, Y
+*   clobbered.
+BmSend              lda       #20
                     sta       FLSHN,u
 af1                 pshs      b,x                 ,s = records left, 1,s = the next
-                    lda       SHOWN,u
-                    eora      #1
-                    tfr       a,b
+                    ldd       LNCALL,u            (the sign-off counts the calls)
+                    addd      #1
+                    std       LNCALL,u
+                    ldb       BSBM,u
                     clra
-                    tfr       d,y                 Y = the hidden bitmap
+                    tfr       d,y                 Y = the bitmap
                     ldb       ,s
                     pshs      u
                     tfr       d,u                 U = the count
@@ -264,14 +351,14 @@ af1                 pshs      b,x                 ,s = records left, 1,s = the n
                     tfr       u,d
                     puls      u
                     bcs       afx
-                    pshs      b                   the pass's budget: B records and a call
-                    lda       #RECUS
-                    mul
-                    addd      #CALLUS
-                    ldx       #MINBUS
-                    lbsr      Spend               (which may give the tick back here)
+                    cmpb      ,s                  short (the FIFO's room ran out): counted
+                    bhs       af2
+                    pshs      b
+                    ldd       LNSHRT,u
+                    addd      #1
+                    std       LNSHRT,u
                     puls      b
-                    tstb
+af2                 tstb
                     beq       af3                 none: the FIFO is full
                     pshs      b
                     ldb       1,s
@@ -290,25 +377,299 @@ af3                 dec       FLSHN,u
 af4                 puls      b,x
                     tstb
                     bne       af1
-                    bra       NxtBat
-afx                 puls      b,x
-                    bra       NxtBat
-
-* NxtBat - AVGPG+AV.RMAX, the next batch's size: the records the pass's
-*   budget still covers, (WORK - CALLUS) / RECUS, at least MINREC, at
-*   most 255.  U = the data area; A, B clobbered.
-NxtBat              ldd       WORK,u
-                    subd      #CALLUS
-                    blt       nb1
-                    lslb
-                    rola                          A = D / 128 (D < 32768)
-                    ldb       #RECK
-                    mul                           A = D / RECUS
-                    cmpa      #MINREC
-                    bhs       nb2
-nb1                 lda       #MINREC
-nb2                 sta       AVGPG+AV.RMAX,u
                     rts
+afx                 puls      b,x,pc
+
+                    ifdef     AVWELL
+********************************************************************
+* The well (docs/status.md, "The well"): avg.a captures the records
+*   of the well's sub-list (AV.WNC of them at window A + $1E00, WNEW),
+*   and it is drawn once into the text bitmap (2), on the back layer,
+*   while its geometry holds: WellCom, after the interpreter, before
+*   the flip.  WLOLD keeps the well as last drawn (WLON records), WLST
+*   says it is in the back layer.
+*     In the back layer, the same geometry: the records whose colour
+*       is not the back layer's (the lane the player is on, the pulsars'
+*       flashes) go with this frame's lines, on top; the back layer is
+*       left alone, and the next frame's clear takes them away (the user's
+*       idea, 2026-09-23).  WLOLD keeps the back layer's colours.
+*     In the back layer, the geometry changed (the zoom; no well; an
+*       overflow): the old well is drawn in 0 there (erased), the text
+*       redrawn whole (TXALL: the erase cut it), and this frame's well
+*       goes with the lines.
+*     With the lines: once the geometry has held WSTAB frames running,
+*       the well goes into the back layer; until then with the lines.
+*   Text erased over the well cuts it: WlRows, from TxCommit between its
+*   erase and its draw, draws the well's records on the erased rows again.
+********************************************************************
+WSTAB               equ       2                   frames the geometry must hold before the back layer
+BMTXT               equ       2                   the text bitmap, on the back layer
+
+* WlAll - X = records, B = the count (1-56), A non-zero to erase: all of
+*   them into the record batch (window A + $1000), then to bitmap BSBM.
+WlAll               pshs      b                   the count, and a copy to count down
+                    pshs      b
+                    ldy       VWIN,u
+                    leay      $1000,y
+wa1                 lbsr      WlCv1
+                    dec       ,s
+                    bne       wa1
+                    leas      1,s
+                    puls      b
+                    ldx       VWIN,u
+                    leax      $1000,x
+                    lbra      BmSend
+
+* WlSame - WLNEW, WLN, and WLSAM: this frame's well has WLOLD's geometry.
+WlSame              ldx       VWIN,u
+                    leax      $1E00,x
+                    stx       WLNEW,u
+                    clr       WLSAM,u
+                    ldb       AVGPG+AV.WNC,u
+                    stb       WLN,u
+                    beq       ws9                 no well: not the same
+                    tst       AVGPG+AV.WOVF,u
+                    bne       ws9
+                    cmpb      WLON,u
+                    bne       ws9
+                    leay      WLOLD,u             record for record
+                    pshs      b
+ws1                 ldd       ,x
+                    cmpd      ,y
+                    bne       ws8
+                    ldd       2,x
+                    cmpd      2,y
+                    bne       ws8
+                    ldd       4,x
+                    cmpd      4,y
+                    bne       ws8
+                    leax      8,x
+                    leay      8,y
+                    dec       ,s
+                    bne       ws1
+                    inc       WLSAM,u
+ws8                 leas      1,s
+ws9                 rts
+
+* AvgLast - from the interpreter, the list done and its last batch not yet
+*   sent (avg.a AvLast): X = where a record may go, B = the room.  With
+*   the well in the back layer and the same geometry, its records not in
+*   the back layer's colour (the player's lane) join that batch - no call
+*   of their own; WLDONE then tells WellCom there is nothing left to do.
+*   Out: B = the records added.  A, X, Y clobbered.
+AvgLast             stx       WLDST,u
+                    stb       WLI,u               the room
+                    clr       WLK,u
+                    clr       WLDONE,u
+                    bsr       WlSame
+                    tst       WLST,u
+                    beq       alx
+                    tst       WLSAM,u
+                    beq       alx
+                    ldx       WLNEW,u
+                    leay      WLOLD,u
+                    ldb       WLN,u
+                    stb       WLT,u
+al1                 lda       6,x
+                    cmpa      6,y
+                    beq       aln
+                    tst       WLI,u
+                    beq       alx                 no room: WellCom sends them (all again)
+                    pshs      y
+                    ldy       WLDST,u
+                    ldd       ,x                  as it is (AvgFlush makes it 640), byte 7 0
+                    std       ,y
+                    ldd       2,x
+                    std       2,y
+                    ldd       4,x
+                    std       4,y
+                    lda       6,x
+                    clrb
+                    std       6,y
+                    leay      8,y
+                    sty       WLDST,u
+                    puls      y
+                    inc       WLK,u
+                    dec       WLI,u
+aln                 leax      8,x
+                    leay      8,y
+                    dec       WLT,u
+                    bne       al1
+                    inc       WLDONE,u
+alx                 ldb       WLK,u
+                    rts
+
+* WellCom - the frame's well (above), after the list's last batch is
+*   sent.  A, B, X, Y clobbered.
+WellCom             tst       WLDONE,u            AvgLast put what there was into the batch
+                    lbne      wlx
+wl2                 lda       #BMTXT
+                    sta       BSBM,u
+                    tst       WLST,u
+                    lbeq      wl5
+                    tst       WLSAM,u             in the back layer
+                    beq       wl4
+                    lda       SHOWN,u             the same: the records not in the back layer's
+                    eora      #1                  colour, with this frame's lines
+                    sta       BSBM,u
+                    ldx       WLNEW,u
+                    leay      WLOLD,u
+                    clr       WLK,u
+                    ldd       VWIN,u
+                    addd      #$1000
+                    std       WLDST,u
+                    ldb       WLN,u
+                    stb       WLI,u
+wl3                 lda       6,x
+                    cmpa      6,y
+                    beq       wl3n
+                    pshs      x,y
+                    ldy       WLDST,u
+                    clra
+                    lbsr      WlCv1
+                    sty       WLDST,u
+                    puls      x,y
+                    inc       WLK,u
+wl3n                leax      8,x
+                    leay      8,y
+                    dec       WLI,u
+                    bne       wl3
+                    ldb       WLK,u
+                    beq       wl3x
+                    ldx       VWIN,u
+                    leax      $1000,x
+                    lbsr      BmSend
+wl3x                rts                           (WLOLD stays the back layer's)
+wl4                 ldb       WLON,u              changed: the old one out of the back layer
+                    beq       wl4a
+                    leax      WLOLD,u
+                    lda       #1
+                    lbsr      WlAll
+wl4a                clr       WLST,u
+                    clr       WLSTB,u
+                    inc       TXALL,u             (the erase cut the text: all of it again)
+                    bra       wl6
+wl5                 tst       WLSAM,u             with the lines
+                    beq       wl5a
+                    inc       WLSTB,u
+                    lda       WLSTB,u
+                    cmpa      #WSTAB
+                    blo       wl6
+                    ldx       WLNEW,u             settled: into the back layer
+                    ldb       WLN,u
+                    clra
+                    lbsr      WlAll
+                    inc       WLST,u
+                    bra       wl9
+wl5a                clr       WLSTB,u
+wl6                 ldb       WLN,u               this frame's well with the lines
+                    beq       wl9
+                    lda       SHOWN,u
+                    eora      #1
+                    sta       BSBM,u
+                    ldx       WLNEW,u
+                    clra
+                    lbsr      WlAll
+wl9                 ldb       WLN,u               WNEW is now the well last seen
+                    stb       WLON,u
+                    beq       wlx
+                    ldx       WLNEW,u
+                    leay      WLOLD,u
+                    lslb                          4 words a record
+                    lslb
+                    pshs      b
+wl9a                ldd       ,x++
+                    std       ,y++
+                    dec       ,s
+                    bne       wl9a
+                    leas      1,s
+wlx                 rts
+
+* WlRows - from TxCommit, after its erase: the back layer's well records
+*   on the rows it erased (ROWMSK, from the first to the last marked),
+*   drawn again before the new text goes on.  A, B, X, Y clobbered.
+WlRows              tst       WLST,u
+                    lbeq      wrx
+                    tst       TXERS,u
+                    lbeq      wrx
+                    leax      ROWMSK,u            the first row erased
+                    clrb
+wr1                 lda       b,x
+                    bne       wr2
+                    incb
+                    cmpb      #30
+                    blo       wr1
+                    lbra      wrx
+wr2                 pshs      b
+                    clrb
+wr2a                lsra
+                    bcs       wr2b
+                    incb
+                    bra       wr2a
+wr2b                stb       WLT,u
+                    puls      b
+                    lslb
+                    lslb
+                    lslb
+                    addb      WLT,u
+                    stb       WLE0,u
+                    ldb       #29                 the last
+wr3                 lda       b,x
+                    bne       wr4
+                    decb
+                    bra       wr3
+wr4                 pshs      b
+                    ldb       #7
+wr4a                lsla
+                    bcs       wr4b
+                    decb
+                    bra       wr4a
+wr4b                stb       WLT,u
+                    puls      b
+                    lslb
+                    lslb
+                    lslb
+                    addb      WLT,u
+                    stb       WLE1,u
+                    clr       WLK,u               the records whose rows meet them
+                    ldd       VWIN,u
+                    addd      #$1000
+                    std       WLDST,u
+                    ldb       WLON,u
+                    beq       wrx
+                    stb       WLI,u
+                    leax      WLOLD,u
+wr5                 lda       4,x                 A = the record's first row, B its last
+                    cmpa      5,x
+                    bls       wr5a
+                    lda       5,x
+                    ldb       4,x
+                    bra       wr5b
+wr5a                ldb       5,x
+wr5b                cmpb      WLE0,u
+                    blo       wr5n
+                    cmpa      WLE1,u
+                    bhi       wr5n
+                    pshs      x
+                    ldy       WLDST,u
+                    clra
+                    lbsr      WlCv1
+                    sty       WLDST,u
+                    puls      x
+                    inc       WLK,u
+wr5n                leax      8,x
+                    dec       WLI,u
+                    bne       wr5
+                    ldb       WLK,u
+                    beq       wrx
+                    lda       #BMTXT
+                    sta       BSBM,u
+                    ldx       VWIN,u
+                    leax      $1000,x
+                    lbra      BmSend
+wrx                 rts
+                    endc
+
 
 ********************************************************************
 * ClutCommit - the colours that changed in colour RAM (CLRSHD, which
@@ -369,7 +730,43 @@ cc6                 puls      a,b                 A = the last, B = the first
                     os9       I$SetStt
                     puls      u
                     leas      1,s
-                    rts
+                    ifne      HIRES
+                    bcs       ccx
+* CLUT 1 for the 640 line bitmaps: entry n = colour n-1 at HIINT, 1-15
+                    leay      CLUTBF,u
+                    clrb
+cc7                 leax      CLSENT,u
+                    lda       b,x
+                    pshs      b
+                    ldb       #HIINT
+                    bsr       Colour1
+                    puls      b
+                    incb
+                    cmpb      #15
+                    blo       cc7
+                    pshs      u
+                    leax      CLUTBF,u
+                    ldy       #$0101              CLUT 1, entry 1
+                    ldu       #15
+                    clra                          path 0
+                    ldb       #SS.ClutWrite
+                    os9       I$SetStt
+                    puls      u
+                    endc
+ccx                 rts
+
+                    ifne      HIRES
+* Colour1 - A = a colour RAM byte, B = an intensity: its entry, B, G, R, A,
+*   at Y (advanced).  X kept.
+Colour1             pshs      b,x
+                    leax      ClutLv,pcr
+                    coma
+                    pshs      a
+                    pshs      b                   ,s = the intensity, 1,s the colour
+                    bsr       c16one
+                    leas      2,s
+                    puls      b,x,pc
+                    endc
 
 * Colour16 - A = a colour RAM byte: its 16 entries (intensity 0-15), B, G, R, A, at Y (advanced).
 *   B, X kept.
@@ -379,29 +776,32 @@ Colour16            pshs      b,x
                     pshs      a                   ,s = the colour, active high
                     clrb
 c16a                pshs      b                   ,s = the intensity, 1,s the colour
-                    lda       1,s                 blue: bit 2, level 0 or $F3
-                    anda      #$04
-                    lsla                          $08: row 2 ($F3) when set
-                    bsr       c16lv
-                    lda       1,s                 green: bit 3
-                    anda      #$08
-                    bsr       c16lv
-                    lda       1,s                 red: bits 1-0, rows 0-3 ($00, $0C, $F3, $FF)
-                    anda      #$03
-                    lsla
-                    lsla
-                    bsr       c16lv
-                    clr       ,y+                 alpha
+                    bsr       c16one
                     puls      b
                     incb
                     cmpb      #16
                     blo       c16a
                     leas      1,s
                     puls      b,x,pc
-* c16lv - A = a level row * 4; ,s+2 = the intensity (past the return): the level at Y+.  X kept.
+* c16one - 2,s = the intensity, 3,s = the colour (past the return): one entry at Y+.  X kept.
+c16one              lda       3,s                 blue: bit 2, level 0 or $F3
+                    anda      #$04
+                    lsla                          $08: row 2 ($F3) when set
+                    bsr       c16lv
+                    lda       3,s                 green: bit 3
+                    anda      #$08
+                    bsr       c16lv
+                    lda       3,s                 red: bits 1-0, rows 0-3 ($00, $0C, $F3, $FF)
+                    anda      #$03
+                    lsla
+                    lsla
+                    bsr       c16lv
+                    clr       ,y+                 alpha
+                    rts
+* c16lv - A = a level row * 4; ,s+4 = the intensity (past two returns): the level at Y+.  X kept.
 c16lv               lsla
                     lsla                          row * 16
-                    adda      2,s                 + intensity
+                    adda      4,s                 + intensity
                     lda       a,x
                     sta       ,y+
                     rts

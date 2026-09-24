@@ -10,7 +10,7 @@
 * line engine (gfx.a), text is glyph masks on a bitmap of its own
 * (text.a), and the controls feed the arcade's switch bytes (input.a).
 *
-* Usage: tempest
+* Usage: tempest              (built with TSND: tempest s, the sound test)
 *   5  coin      1 / 2  start      q  quit
 *   left/right arrows turn, Shift fires, z superzaps; joystick 0 and
 *   the mouse (with SS.MsDelta) too.
@@ -56,8 +56,8 @@ name                fcs       /tempest/
                     include   input.a
                     include   gfx.a
                     include   text.a
-* the vector generator, and the tables it and the text bitmap read.  AvgFlush sizes each batch
-* from the pass's budget (gfx.a NxtBat), so the drawing can give the tick back between them
+                    include   sound.a             the POKEY image on the SIDs; tsnd
+* the vector generator, and the tables it and the text bitmap read
                     include   avg.a
                     include   avgtab.a
                     include   glyphs.a

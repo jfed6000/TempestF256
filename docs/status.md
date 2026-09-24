@@ -1043,25 +1043,657 @@ What was expected: about **60 passes and 13-14 game frames a second**: the hardw
   entries. Horizontal runs double in pixels, so a frame's pixels rise by perhaps half, each one an
   RMW: `tline S` (or the sign-off's numbers) on a HIRES4 plane decides whether it is affordable.
 
-### The high score screen's redraw (2026-09-23; fixed, untested on hardware)
+### The 640×240 test (branch `hires640`, 2026-09-23) — untested on hardware
 
-The K2 (on branch `hires640`) showed **the high score screen clearing and redrawing**. Its text
-list's first entries are a line that alternates every ~2 s between an 11- and an 8-character
-message; `TxCommit` compared the lists index for index, so every later entry differed and all 148
-were erased and redrawn (293 glyphs, ~38 ticks, 0.6 s). `TxMatch` (`text.a`) now matches the lists
-in order with an 8-entry look-ahead each way and flags the changed entries a bit each (`TXFO`,
-`TXFN`): **20 glyphs and ~5.5 ticks a change in the model, every text bitmap checked right**. The
-match costs ~1.1 ms for 148 entries (`TXMUS`); an unchanged list is no longer copied. The 640
-branch's own results are on that branch's copy of this file.
+User: "let's create a 640 test branch and test 640 and see if it looks better." Built:
+
+- **grfdrv256** (`wb/multiterm`, committed locally, not pushed): `SS.BmLine` reads the target
+  plane's HIRES4 bit and allows X to 639 (`LD.MaxX4`) with a 640-pixel FIFO margin
+  (`LD.Room4`); a 320 plane is unchanged. On `l2_wildbitsk2.dsk` and the Jr2 image (targeted
+  copies, compared).
+- **The port** (`HIRES` = 1 in `frame.a`, 0 gives the main build): bitmaps 0 and 1 set by
+  `SS.BmCfg` to HIRES4, CLUT 1, group 0 (back to 320 and CLUT 0 on exit); `AvgFlush` converts each
+  batch once before `SS.BmLine`, X doubled and the colour byte to nibble colour + 1 (colour 15
+  shares 15); `ClutCommit` also writes CLUT 1's entries 1-15, each colour at intensity 12
+  (`HIINT`). The interpreter still works in 320, so endpoints land on even 640 columns while the
+  lines between are drawn at 640; `avgtest.py` is unaffected. `RECUS` 170 covers the conversion.
+- `osrun.py` models `SS.BmCfg`, 4-bit planes, CLUT 1 and 640 pictures: 30 s, **0 ticks lost, 14.2
+  game frames a second, every check right**. The Wildbits MAME: starts, `5`, `1`, rating screen,
+  `q` exits (no line engine there).
+- Unknown until the K2: the engine's speed on a 4-bit plane (each pixel a read-modify-write), and
+  whether intensity 12 for everything looks right.
+
+**On the K2 (user, 2026-09-23): it draws, and the photographs show clean 640 lines** (the circle
+and the bow-tie wells, the claw, the text in front). **1,463 game frames, 6,472 passes in 108 s:
+13.5 game frames a second, no ticks lost** (6,480 ticks). Not comparable with the 320 run's 15.4:
+this one includes attract time with the high-score fault below. "Game play feels snappier", but the
+attract is slow and **the high score screen keeps clearing and redrawing**.
+
+**The high score screen (fixed, main too; untested on hardware).** Its text list's first entries
+are a line that alternates every ~2 s between an 11- and an 8-character message. `TxCommit`
+compared the lists index for index, so every entry after it differed: all 148 were erased and
+redrawn, 293 glyphs, ~38 ticks (0.6 s) of visible clearing each time. `TxMatch` (`text.a`) now
+walks both lists matching in order with an 8-entry look-ahead each way, flagging the changed
+entries a bit each (`TXFO`, `TXFN`); the passes then erase and draw only those (and what an erase
+touched, as before). In the model's attract: **20 glyphs and ~5.5 ticks a change instead of 293
+and 38; every frame's text bitmap checked right**. The match costs about 1.1 ms for 148 entries,
+charged as `TXMUS`. A list that has not changed is no longer copied. The high score screen's
+first appearance still draws its 148 glyphs, ~21 ticks; the logo's 13 moving texts still redraw
+every frame.
+
+**The K2 with the text fix (user, 2026-09-23): 2,246 game frames, 10,390 passes in 173 s: 13.0
+game frames a second, no ticks lost** (10,380 ticks, within the sign-off's ±60).
+
+**The fonts at 640 (user: "a little too thick ... don't look crisp like the actual game"; untested
+on hardware).** The glyphs were masks rendered at 320 columns, so on a 640 display every vertical
+stroke was 2 dots wide. Now the text bitmap is a 640 4-bit plane too (`BmHi` on bitmap 2, CLUT 1,
+the lines' 16 colours), `tools/glyphs.py --hires` renders the masks from the vector ROM at 640
+columns with 1-dot strokes (16-dot, 2-byte rows, 26-byte records; normal glyphs 8×6 at most, big
+14×11), and `TxDraw` doubles an entry's column and writes each dot as a nibble (colour + 1, as
+the lines). The rows stay 240, so the small font is still 6 rows tall. `osrun.py` checks the 640
+text plane: play and attract, every frame right. `HIRES` = 0 now also needs main's `text.a` and
+`glyphs.a`.
+
+**Spacing (user: "the J is right up against the D").** The masks were fine (8 dots wide, 10.07
+advance) but a character's column was the beam rounded to 320 and then doubled: the 4.945-column
+advance can round to 4, i.e. 8 dots, exactly a glyph's width. With `HIRES`, `avg.a` now writes a
+text entry's column in 640ths, round(2x) from the beam's fraction (`AVTX64`; the host tests
+assemble without `HIRES` and keep checking the 320 form: `avgtest.py` play capture, 3,481 frames
+byte-exact). The top line's E, J, D: columns 333, 343, 353, 2-dot gaps. Play and attract checks
+right. The line records still double a 320 endpoint (to do the same for lines: the next step).
+
+**The logo's smear and the copyright line's "shadow" (K2 photographs, 2026-09-23).** The attract
+logo is ~700 vectors: the TEMPEST outline repeated at a row or two apart in five colours. MAME's
+own frame (`avg_attract.bin` 6861, drawn from Atari's list at 1280×960) shows the copies as
+separate outlines; the same frame drawn at 640×240 merges them into exactly the photographed
+smear, and `osrun.py`'s picture of the port agrees. **It is the 240 rows, not a fault.** Possible
+remedy (a port simplification, the user's call): draw only some of the copies. The copyright line
+is clean in the model: dark blue text on black, which a capture device smears most; to be
+checked on a direct monitor.
+
+## Small shapes collapsed (2026-09-23, host only) — for review
+
+Built by request and measured. **In the module on branch `hires640`** (`frame.a` sets `AVCOLL`,
+beside `HIRES`; without it avg.a assembles as before), on both disk images (targeted copy, copied
+back and compared). Untested on hardware. The Wildbits MAME: title, coin, start, the rating
+screen, `q` and the sign-off, as before. **The host model** (`osrun.py --seconds 60`, the same
+estimates, `RECUS` 170): **13.7 → 14.5 game frames a second**; 166 → 147 records a frame; passes
+median 10.6 → 10.4 ms, max 17.7 → 16.9; ticks lost 12 → 13 in 3,600 (the same few passes near the
+tick); every check right. The gain follows the records, not the interpreter's 22%: the split frame
+charges each record its estimate, whose real cost (~102 µs interpreted, against ~105 before) is
+unchanged. Lowering `RECUS` is the separate next step, one change a hardware run.
+
+**The rule** (the specification is `PortAVG(collapse=True)`): a JSRL to one of 20 ROM pictures
+(`shape_table`: the game's non-character targets that are only VCTR/SVEC/STAT/JMPL, 9 strokes or
+more) is not run when the picture would be drawn under **2 px across**. Instead: a block of its box,
+one horizontal record a row, in the CLUT of its **last lit stroke** (it paints on top; the first
+stroke's colour and the stroke majority both came out wrong, e.g. $ACA's 9 colour-8 strokes under
+8 yellow ones); the beam moves by its net move × Q; the colour and intensity it leaves are set. The
+test is a table compare, no multiply: Q < `qmax` = ⌈2·65536 / E⌉ (E the box's larger side, v_eff)
+and bs ≤ `bslim` (above it the AVG's clamps change the geometry: bs 5-7). The beam ends exactly
+where running the shape leaves it (every captured frame: the records outside collapsed shapes and
+the end state are identical).
+
+**Why it pays:** 59% of play's records are dots from enemies deep in the tube, whose 16-45 strokes
+round onto 2-3 pixels. Measured first in a prototype (at 1, 2 and 3 px; dot or block): 1 px saves
+nothing visible or measurable, a single dot at 2 px visibly loses the enemies, **the block at 2 px
+changes 2.7 pixels a play frame** and is hard to tell from the exact picture; 3 px starts to show.
+
+**Built:** `avgview.py` (`shape_walk`, `shape_table`, `--port --collapse`, `--tables` also writes
+the table), `avgtab.a` (`AvSTab` 20 × 21 bytes, `AvSMap` 128 bytes, all under `ifdef AVCOLL`),
+`avg.a` (`AvShp`, a range check at `_JS2`), `avgtest.py --collapse` (and its fuzz calls the shapes
+at every binary scale). Module with `AVCOLL`: **37,662 bytes** of 40,192 (+914); `make pic` clean.
+
+| `avgtest.py`, 8 MHz | Play median | Play 95% | Attract median | Attract 95% | Max |
+|---|---:|---:|---:|---:|---:|
+| Before | 16.87 ms | 22.10 | 16.97 | 41.89 | 47.28 |
+| **`AVCOLL`** | **13.18** | **20.19** | **14.81** | 42.25 | 47.64 |
+| `AVCOLL --sw` | 14.43 | 22.61 | 16.19 | 45.43 | 50.82 |
+
+All 6,282 frames byte-exact against the specification (both multiplies); `--fuzz 10000` none failed
+(and `--sw --batch 0 --seed 7`), ~29,000 shapes collapsed in each. Play also sends fewer records:
+median **129 against 161** (vectors run: 225 against 394), about another 0.8-1 ms of driver at the
+guessed 25-30 µs a record. The attract logo costs ~0.36 ms more (its ~135 JSRLs pay the range
+check). Found on the way: the first table held three 6-8-stroke pieces the logo calls large
+($FC4, $FD1, $FEA: tested 76 times a logo frame, almost never collapsed), which made the logo
+1.4-2 ms slower; hence the 9-stroke minimum, the empty-bucket marks and the range check.
+
+**For review:** the look (the prototype's side-by-side crops were sent in the session; `avgview.py
+--port --collapse --png DIR --frames N` draws any frame), whether to put `AVCOLL` in the module's
+build, and then the budget estimates (`RECUS` a record) the split frame charges, which the faster
+records would let come down.
+
+## BmWait removed (2026-09-23, host only) — untested on hardware
+
+The drawing's first step asked `GetStat SS.BmClear` whether the clear `GamLog` armed had run: one
+grfdrv call a game frame (~450 µs at Joust's K2 figures), and in the model it never once found the
+fill busy. It cannot: `BUDLOG` = 0 puts the drawing in a later tick than the arming, the fill
+starts at that tick's vertical blank at the latest, and the DMA halts the CPU until it is done. So
+the call went, with its bounded retry and `NODMA` fallback (a fill that fails to *arm* still falls
+back to the CPU clear); `frame.a` refuses to assemble with `BUDLOG` other than 0. What would show
+if the argument were wrong: old lines left in the picture, not a hang. `osrun.py` 60 s (with
+`AVCOLL`): **14.6 game frames a second** (14.5), 5 ticks lost in 3,600 (13), no line drawn before its
+clear, every check right. Module 37,614 bytes. The calls a game frame now makes (`osrun.py`):
+`SS.LiveKeys` and `SS.Joy` 4 each (one a pass), `SS.BmLine` 2.4, `SS.BmClear` 1, `SS.Layer` (the
+flip) 1, `SS.ClutWrite` 0.5.
+
+**On both disk images together with the small-shapes build** (user's call, one hardware run for
+both; targeted copy, copied back and compared). The Wildbits MAME: title, coin, start, the rating
+screen, `q` and the sign-off.
+
+Also: the program's `SS.DScrn` is now spelled **`SS.MCR`** (`wildbits.d`'s name for the same code;
+`SS.Layer` was already used for `$8E`), and `osrun.py` uses both new names. Module byte-identical.
+
+## RECUS 150 (2026-09-23, host only) — prepared for the run after the current one
+
+`RECUS` is the frame loop's estimate of what one line record costs (µs): interpreting it, making it
+640, and the driver drawing it. `AvgFlush` charges each `SS.BmLine` batch `records × RECUS +
+CALLUS` to the pass's budget, and `NxtBat` sizes the next batch to what the budget still covers.
+Too high: passes end with time unused and a game frame takes more of them. Too low: a pass runs
+past its tick and loses it (the game's clock, one pass a tick, runs slow). It must stay 129-255
+(an 8-bit operand, and `RECK` = 32768/`RECUS` a byte).
+
+The sweep (`osrun.py` 60 s each, with `AVCOLL` and without `BmWait`; the driver's cost guessed):
+
+| `RECUS` | 170 | 160 | 155 | **150** | 140 | 130 |
+|---|---:|---:|---:|---:|---:|---:|
+| Game frames a second | 14.6 | 14.6 | 14.8 | **15.4** | 15.7 | 16.1 |
+| Ticks lost of 3,600 | 5 | 14 | 27 | **44** | 73 | 103 |
+
+**150 is in `frame.a`, committed; NOT on the disk images**, which hold the build before it
+(`78acb1e`, under test). What the hardware run says: game frames a second against the run before,
+and **passes a second** from the sign-off (60 = no tick lost; the model loses 1.2% at 150, i.e.
+~59.3). The model's driver cost is a guess, and the K2 drew faster than it guesses (3.9 passes a
+game frame against 4.1), so the hardware may lose fewer. If it loses more than ~1%: 160.
+
+## Hardware: the collapse and BmWait build works (user, 2026-09-23)
+
+`78acb1e` (small shapes collapsed, `BmWait` removed) runs on the K2 (user: "current build
+works"; no numbers given). **A new core followed** (user): the line engine's pixel FIFO doubled,
+more RAM access time, other optimisations — expected faster. Not yet measured with this port;
+the driver's FIFO margin in `SS.BmLine` (640 pixels) could grow with it (a driver change, for review).
+
+## Sound: tsnd, the POKEY image on the SIDs (2026-09-23, host and MAME) — untested on hardware
+
+Plan stage 4, D5 (a). **`src/sound.a`**: `SndInit`, `SndOut` (once a pass), `SndExit`, and **`tsnd`,
+the sound test: `tempest s`** (the text screen stays; `0`-`9` `a` `b` `c` start sounds 0-12 through
+`FSNDON`, as the game's calls do; `r` plays the sequence; `x` stops; `q` quits). **The game does not
+call `SndOut` yet**: the game path is as before but for three trivial lines (the parameter read,
+`GFXON`, `SndExit` in `Cleanup`).
+
+**What the FPGA has** (read in `fpga-6809-cores-staging`, not changed): the SIDs are at physical
+`$18_8000` = block **`$C4`**: left `+$000`, right `+$100`, and `+$080` ("mono") writes **both**
+(`SID_OPL3_Interface.v`: two `sid6581` instances, Gideon Zweijtzer's core). **Two SIDs, six voices,
+not the plan's three and nine**; the guide and the plan are corrected. The SID clock is 14.318 MHz
+/ 15 = **954,545 Hz**; the SIDs, OPL3 and PSGs are mixed in the FPGA and sent to the codec over I2S
+(`SoundChips2DAC_Interface.v`), so no codec input to select for them. Both SIDs are summed to both
+channels unless system control bit (`ControlRegisters[1][3]`) says stereo; left alone. The Jr2's
+top module wires them the same way. Reached through the service window with `Map1` (`F$MapBlk`),
+no absolute address: `SndOut` maps block `$C4` when the text drawing has borrowed the window.
+
+**What Tempest asks of it** (stock MAME, 300 s of the scripted game, every POKEY write logged):
+channels sounding at once: 0 34.1%, 1 25.1%, 2 28.1%, 3 11.1%, 4 1.5%, **5 0.1%, never 6**; POKEY
+1 channel 4 never. `AUDCTL` always 0 (64 kHz base, no joins, no filters). `AUDC` forms: `$A`
+(pure tone) most, `$8` (17-bit noise), and the 5-bit polys `$0`, `$2`, `$6`. **So six voices are
+enough, handed out as channels start sounding.**
+
+**The mapping** (POKEY at 12.096 MHz / 8 = 1.512 MHz, base 54,000 Hz): a pure tone becomes a
+50% pulse at 27,000 / (`AUDF`+1) Hz (SID frequency 474,555 / (`AUDF`+1), held to `$FFFF`); every
+polynomial form becomes SID noise stepped as often as the POKEY samples its polys (SID frequency
+59,319 / (`AUDF`+1), one coprocessor divide); the volume becomes the sustain level (attack, decay,
+release 0). A SID's envelope does not climb to a raised sustain, so a louder volume, or a new
+waveform, re-gates the voice (gate off, 25 µs, gate on): **unchecked on the soft SID**, like the
+sustain-down path. The 5-bit polys as plain noise is the roughest approximation.
+
+**Tests:** `tools/sndtest.py` runs `tempest s` on the host, presses `r`, taps every SID write and,
+after every pass, checks each sounding channel has one gated voice with the right waveform,
+frequency and sustain, and no stray voice: **2,699 passes, 0 wrong**, 1,420 SID writes in 45 s,
+136 re-gates. The Wildbits MAME runs `tempest s` (help text, the sequence, `q`) and the game
+(title, coin, start, rating screen, sign-off), but **it has no sound at all** (its WAV has no
+channels), so the ears are the hardware's. **The reference**: `tools/sndref.lua` plays the same
+sequence in stock MAME from the arcade's own RAM (what `FSNDON` writes) — `captures/sndref_arcade.wav`
+and a DC-free copy to listen to, `captures/sndref_arcade_listen.wav` (the sequence starts at 10 s:
+13 sounds of 2.5 s — cursor, explosion, fire, pulsation, special, dies, thrust tube, thrust space,
+enemy shot, enemy line, slam, 3 seconds, pulsar off (silent: it only stops) — then thrust + fire
+and pulsation + explosion, 4 s each). Module 38,684 bytes; `make pic` clean. **On both disk
+images, with `RECUS` 150** (the game's run of that is the other test on this image).
+
+## Hardware: RECUS 150 on the new core (user, 2026-09-23)
+
+`9b167ec` on the K2 with the new core (doubled line FIFO): **3,429 game frames, 14,597 passes in
+245 s: 14.0 game frames and 59.6 passes a second.** 245 s is 14,700 ticks, so ~103 lost (0.7%),
+inside the sign-off's own error (whole seconds, ±60 ticks): **`RECUS` 150 holds on hardware** (the
+model lost 1.2%). User: "earlier levels definitely felt faster; slight slowdown on later levels as
+more enemies added". Not comparable one to one with the 640 build's 13.0 (that run had attract in
+it; this one is play into later levels). Two changes in this run (the core and `RECUS`), so the
+share of each is not known. `tsnd` not yet reported.
+
+## Sound in the game (2026-09-23, host and MAME) — untested on hardware
+
+`tsnd` on the K2 (user): "sounds good to me" — taken as D5 (a), the SIDs, accepted as it stands.
+**The game now plays it**: `SndInit` at start (a failure leaves the game silent), **`SndOut` once
+a pass** in the main loop after the virtual IRQs, `SndExit` while paused (hidden terminal) and
+`SndInit` on the way back, `SndExit` on every exit.
+
+**The window.** The SIDs share the service window with the text bitmap. The first build thrashed
+it: the text's drawing mapped its block, the next pass's `SndOut` mapped `$C4` back, the text
+mapped its block again — 412 `F$MapBlk` a minute against 140 without sound. **`SndOut` now waits
+while a game frame's drawing is under way and the text holds the window** (`DRAWNG`), so sound is
+late by up to a game frame on the few frames whose text changed: 204 a minute.
+
+**The cost** (`osrun.py`, 60 s of play): `SndOut` **145 µs a pass median**, 200 at 95%, 643 at
+most (a remap), 8.6 ms a second. It runs outside the drawing's budget, so **`BUDPAS` 12,500 ->
+12,300**: ticks lost 45 in 3,600 (44 without sound; 56 before the budget gave way), **15.0 game
+frames a second against 15.4 without sound**. `tools/sndtest.py --game` (120 s of play): **6,755
+passes checked, 0 wrong**, up to 4 channels at once, 996 re-gates, the SIDs mapped 109 times;
+374 passes ended with the text in the window (`SndOut` waited). `tsnd` unchanged (2,699, 0 wrong).
+The Wildbits MAME: the game and `tempest s` as before (no sound there). Module 38,714 bytes, on
+both disk images.
+
+## Sound slower on hardware; the SIDs through the MMU (2026-09-23) — untested on hardware
+
+**K2, `a125158` (sound in the game): 1,758 game frames, 6,304 passes in 108 s** (user: "definitely
+slower with sound on"): 16.3 game frames and **58.4 passes a second, ~176 ticks lost (2.7%)**
+against 0.7% the run before (0.7% was 245 s of play; this is 108 s, other levels: not a clean
+comparison). The model predicted no extra loss, so something in the sound path costs more on the
+hardware than the model thinks; not identified.
+
+**The user's call: reach the SIDs through the MMU directly** — the third absolute-address exception,
+`$FFA0`-`$FFAF` (`tools/piccheck.py` knows it). `SidOn`: interrupts masked, `$FFA0` saved and its
+edit LUT set to the active one (bits 5-4 = bits 1-0, from `TyVKy2K2x1_MMU_Register.v`), **window
+A's slot** saved and given block `$C4`; `SidOff` puts both back and the mask. Window A because only
+the main loop uses vector RAM, and `SndOut` is part of it; with interrupts masked no task switch can
+reload the MMU. So no `F$MapBlk` for sound at all, no sharing of the service window with the text
+(`SndOut` no longer waits for it). Interrupts are masked for `SndOut`'s whole run, ~150 µs a pass
+(650 at most, before; less now without the remap). `osrun.py` models the MMU registers and fails a
+slot change with interrupts unmasked, in another LUT, or of a slot that is not a window OS-9
+mapped, and any os9 call while a window holds another block. **`tempest n`**: the game without
+sound, for comparing on one image.
+
+Host: `sndtest.py` 2,699 passes and, `--game`, **7,146 passes (all of them now), 0 wrong**, up to
+five channels at once; `osrun.py` 60 s: no errors, `F$MapBlk` back to 140 a minute, 15.0 game
+frames a second, 46 ticks lost (the model never charged the remaps much, so it shows no gain). The
+Wildbits MAME: `tempest`, `tempest n` and `tempest s` as before. Module 38,792 bytes, on both disk
+images. **The run that says which it is: `tempest` and `tempest n`, played alike, sign-offs
+compared.**
+
+Considered (user's question): shrinking the module to leave a second free block, so the SIDs and
+the text bitmap could both stay mapped. The module would have to fit 4 blocks less 768, 32,000
+bytes, against 38,792: 6,800 bytes out, of which the vector ROM (4,096) would have to move into
+window A (the plan's fallback), which is full, so the record batch and the text list move into the
+data area, also nearly full; and ~2,700 more from tables and code. **Decided (user, 2026-09-23): not
+done.** The module stays in 5 blocks; the SIDs stay behind the MMU exception.
+
+## The well: measured, and the layer swap prepared (2026-09-23)
+
+**The well is the display list's sub-list at vector RAM word `$205`: exactly 48 records every play
+frame** (16 rim, 16 far, 16 spokes), about 30% of the median frame's 161. Between consecutive
+play samples (2,531 pairs): identical 25%, **colours only 63%** (the highlighted lane follows the
+player), geometry changed 12% (the zoom between levels). So its shape is fixed 88% of the time.
+
+**The plan (agreed, user 2026-09-23), one hardware run a step:** (1) the text bitmap to the back
+layer; (2) the well drawn once into it, its 48 records kept: identical, nothing sent; colours only,
+the changed segments redrawn; geometry changed, the back-layer well erased (its old lines in colour
+0) and the well drawn with the lines until it settles; (3) text erased over the well redraws the
+segments it cut. Estimated 10-15% more game frames in play: ~42-48 records a frame fewer through the
+driver and, more, through the budget's `RECUS` charge.
+
+**Step 1, prepared** (on the disk images since the sound comparison, below): `GfxInit` puts tile map 0 (off) on layer 0 in front, the lines on layer 1, **the text
+bitmap on layer 2 at the back**. A line crossing text now covers it. `osrun.py` composes its
+pictures front to back from the layers as set (it had the text in front hard-coded). `osrun.py`
+40 s: every check right, 15.1 game frames a second; the Wildbits MAME: title, coin, start, rating
+screen (text shown from the back layer), sign-off. Module 38,792 bytes (unchanged).
+
+## Hardware: sound through the MMU costs nothing measurable (user, 2026-09-23)
+
+`107bf7d` on the K2: **`tempest` 1,599 game frames, 5,754 passes in 97 s** (16.5 and 59.3 a second;
+~66 of 5,820 ticks lost, 1.1%); **`tempest n` 2,087 game frames, 8,065 passes in 135 s** (15.5 and
+59.7; ~35 of 8,100, 0.4%). The difference is inside the sign-off's error (whole seconds, ±60
+ticks); the frame rates follow what was played. The same sound through `F$MapBlk` lost 2.7%
+(58.4 passes a second): **mapping the SIDs with `F$MapBlk`, and the service window swapped
+between them and the text, cost the hardware far more than the model charges.** The MMU path
+stays. **The layer swap (`6371403`) is now on both disk images**, for its own run.
+
+## Hardware: the layer swap works (user, 2026-09-23)
+
+`6371403` on the K2: **2,564 game frames, 10,521 passes in 176 s** (14.6 and 59.8 a second; ~39 of
+10,560 ticks lost, 0.4%). The text on the back layer looks right.
+
+## The well cache (2026-09-23, host and MAME) — untested on hardware
+
+**The well is drawn once into the back layer (bitmap 2, with the text) and left there while its
+geometry holds.** Atari double-buffers it: `DSPWEL` rebuilds it only when it changes (`ROTDIS`) and
+patches its colour `STAT`s every frame; the top-level list always calls the switch `SWWELL`, word
+**`$205`**, which jumps into the active buffer.
+
+- **`avg.a` (`AVWELL`)**: while `AV.WENA` is set, the records made inside the JSRL to `$205` (to its
+  RTSL; repeated calls add to it) go to window A + `$1E00`, 56 at most (the 56th ends it: an
+  overflow, the rest go to the lines); `AV.WNC`, `AV.WOVF`. Captured records take room in the batch
+  they are interpreted in (`AV.WCB`), and `AvgFlush` charges them at **`WCBUS` 110 µs** (swept in
+  `osrun.py`: 50-90 lost 95-141 ticks a minute, 110-130 lost 17-19, the baseline). **Specified by
+  `PortAVG(well=True)`**; `avgtest.py --well`: **6,282 frames byte-exact** (both multiplies), **fuzz
+  20,000, 0 failed, 1,764 overflows** (its lists call a well at `$205`, sometimes over 56).
+- **`gfx.a` `WellCom`** (after the interpreter, before the flip), against `WLOLD`, the well as in
+  the back layer: **same geometry, in the back layer**: the records whose colour is not the back
+  layer's (the player's lane, the pulsars' flashes) go with this frame's lines, on top, and the
+  line clear takes them away next frame (**the user's idea**: nothing is redrawn in the back layer
+  during play); **geometry changed** (the zoom, no well, an overflow): the back-layer well drawn
+  in colour 0 (erased), the text redrawn whole (`TXALL`), the well with the lines; **with the
+  lines**: after 2 frames (`WSTAB`) of the same geometry it goes into the back layer. Sends ask the
+  pass for room first (`WlSend`: `WELUS` 50 µs a record and the call). `AvgFlush`'s loop is now
+  `BmSend` (any bitmap, a charge a record).
+- **`text.a`**: between its erase and its draw, `WlRows` draws again the well records on the rows
+  the erase touched (text erased over the well cut it); `TXALL` marks every row.
+- **`osrun.py`**: a model bug found on the way: its `SS.BmLine` drew into a block without first
+  taking back what the program had written through a window onto it, so it undid text erases
+  (fixed: `sync_out` first; on the F256 it is one memory). **New check, every frame**: the text
+  bitmap holds exactly the text and, when cached, `WLOLD`'s lines (any of their colours where a
+  glyph and the well, or two well records, meet), nothing else; the well's records not in the back
+  layer's colour, or all of them when not cached, are among the line layer's records.
+
+**Results** (`osrun.py` 120 s): every check right; **15.0 game frames a second**, 20 ticks lost in
+7,200; line records a frame 147 -> ~110; the well in the back layer ~75% of game frames. **The
+frame rate does not move in the model**: a game frame is a logic pass and then drawing passes,
+whole ticks each; the drawing still needs two passes (its estimate ~15 ms against the pass's 12.3),
+so frames stay at ~3 ticks. The gain arrives when a frame's drawing fits one pass; the hardware draws
+faster than the model guesses, so the K2 may see it where the model does not. `sndtest.py --game`
+90 s: 5,377 passes, 0 wrong. The Wildbits MAME: the game and `tempest s`. **Module 39,663 bytes of
+40,192 (529 left).** On both disk images.
+
+## The line FIFO doubled (2026-09-24) — the driver change prepared, not installed
+
+The FPGA developer doubled the line engine's pixel FIFO to 8,192 (user: confirmed). `SS.BmLine`
+stops a batch when the FIFO's count passes `LD.Room4` = `LD.Depth` - 640 and returns short; each
+short return costs us a whole extra call (~450 µs). The driver had `LD.Depth` 4,096 built in, so it
+used half the new FIFO. **NitrOS-9 `wb/multiterm` (committed locally, not pushed): `LD.Depth` 8,192**
+(`defs/wildbits.d`; the built `grfdrv256` differs in the two room constants and the CRC; both
+platforms' builds of the old source were first checked identical to the drivers on the images).
+**Not on the disk images yet**, so that one run measures the old driver and the next the new.
+
+**The measure: the sign-off's second line, "LLLLL line calls, KKKKK short"** (`BmSend` counts each
+`SS.BmLine` call and each that came back short; `osrun.py`'s driver never runs short, so it
+reads 0 there). On both disk images with the well cache (module 39,764 bytes, 428 left).
+
+## Hardware: the well cache, first run (user, 2026-09-24)
+
+`2c1701f` on the K2 (the well cache, the old 4,096 driver): **3,675 game frames, 17,958 passes in
+299 s: 12.3 game frames and 60.1 passes a second, no tick lost.** Below the earlier runs' 14.0-16.5,
+but those were other lengths and levels; not a clean comparison. User: "every time we change
+something we get slower ... are we still calculating [the well]?" **Yes: only its drawing left the
+loop.** The interpreter still runs its sub-list every frame and the budget charges it 48 x
+`WCBUS` 110 µs, ~5.3 ms (it was 48 x `RECUS` 150, ~7.2 ms); and the records not in the back layer's
+colour (the player's lane, most frames) go in **a call of their own**: in the Wildbits MAME (call
+counts are logic, not timing) 1,800 `SS.BmLine` calls in 29 s against 1,169 with the cache off,
+~55% more, at ~450 µs each on the K2. So the cache as built may well cost more than it saves.
+
+**`tempest w`**: the game with the cache off (`AV.WENA` 0; the well with the lines, as before), for
+a comparison on one image. On both disk images (module 39,772 bytes).
+
+**The fix, proposed**: take the well out of the loop for real. Keep the well sub-list's bytes and
+the interpreter's state after it; when the bytes are unchanged (Atari rebuilds the well only when
+its shape changes, `ROTDIS`), do not run it at all: restore that state and charge nothing; when only
+its colour `STAT`s changed, run it as now. And put the off-colour records in the frame's batch, not a
+call of their own.
+
+## The well out of the loop (2026-09-24, host and MAME) — untested on hardware
+
+User: "Don't we know when the well changes? ... take the well out of the loop for real"; "why not just
+change it when the level changes?"; "the highlighted lane ... should just be added to the array for
+the one call". **Atari rebuilds the well only when its shape changes, into the spare buffer, and
+then switches SWWELL's jump to it**, so SWWELL's word changing is the well changing: no checksum.
+The captures: SWWELL always jumps to `$206` or `$2A7`; each buffer is one straight run (a `CNTR`, a
+`SCAL`, 49-66 vectors, 17 colour STATs, `RTSL`), no jump elsewhere. The user's CLUT idea
+(recolouring by CLUT, not by drawing) does not fit: the 640 planes have 16 colour indices, shared
+with the text, and the well has 16 lanes and 48 segments.
+
+- **`avg.a`**: at the frame's first call into the well, **if SWWELL's word, and the colour and
+  intensity it is entered with, are the cache's, the well is not run**: the cached records at
+  window A + `$1E00`, each recoloured from the colour word it was drawn in (a captured record's
+  byte 7: the word offset from the buffer, `$FF` none), and the interpreter's state as the well
+  left it (beam, Q, scales, colour from its last colour word, intensity, the dot rule's last
+  record). A call run whole and returned from is the cache; an overflow, or the list ending inside
+  it, forgets it. Nothing is charged for a skipped well. **`AvLast`**: before the list's last batch
+  is sent, the platform's `AvgLast` may add records to it.
+- **`gfx.a`**: `AvgLast` puts the well's records not in the back layer's colour (the player's
+  lane) **into that last batch: no call of their own**; `WellCom` does the rest after the flush.
+- **Checked**: `PortAVG(well=True)` specifies it, cache and all. On the frame-by-frame capture
+  (`captures/avg_play_every.bin`, 120 s of play from stock MAME, every video frame) the skip gives
+  **exactly** what running the well whole does in all 6,602 frames (3,870 skipped); on the sampled
+  captures it does not always (436 of 3,481: the game rebuilt twice between samples, back to the
+  same buffer; the port sees every game frame). `avgtest.py --well`: **6,282 frames exact** (both
+  multiplies; the well skipped in 3,609), **the frame-by-frame capture 6,602 exact** (3,464 skipped;
+  its 36 power-up frames fail with or without the well: vector RAM before the game wrote it, which
+  the specification leaves open), **fuzz 20,000, 0 failed** (3,390 skips: a rig's last list again,
+  some colour words changed; 1,617 overflows). The interpreter: **median 13.5 -> 11.1 ms** on the
+  captures, 10.0 frame by frame.
+- **`osrun.py` 120 s: 16.9 game frames a second (15.0 before)**, median 2.5 ticks a game frame (3.1),
+  43 ticks lost in 7,200, every check right. `sndtest.py`: game 3,557 and tsnd 2,699 passes, 0 wrong.
+  The Wildbits MAME (call counts): **839 `SS.BmLine` calls in 29 s**, against 1,201 with `tempest w`
+  and 1,800 for the build before. **Module 40,178 bytes of 40,192: 14 left** (tsnd's help is one
+  line now). On both disk images.
+
+## Hardware: the well out of the loop (user, 2026-09-24)
+
+`4794628` on the K2: **1,594 game frames, 5,383 passes in 89 s: 17.9 game frames and 60.5 passes a
+second** (no tick lost), **3,151 line calls, 0 short**: the best run yet (12.3-16.5 before; other
+levels, so `tempest w` on this image is the clean comparison, not yet run). **2.0 `SS.BmLine` calls
+a game frame, and none came back short** even with the 4,096 driver: no frame's batch fills its
+room, so **the 8,192 driver change (`c45760ab`, local) would gain nothing now**; it stays off the
+images and unpushed unless short returns appear.
+
+**`tempest w` on the same image** (the well run every frame): **2,524 game frames, 11,737 passes in
+196 s: 12.9 game frames and 59.9 passes a second; 7,256 line calls, 0 short.** Against `tempest`:
+**4.7 passes a game frame against 3.4, 2.9 line calls a game frame against 2.0**. The runs' lengths
+differ (196 s reaches heavier levels than 89 s), but a game frame is a tick shorter and a call
+lighter: **the well out of the loop is worth ~35-40% more game frames on the K2.**
+
+## The 8,192 driver installed; `w` removed (2026-09-24)
+
+User: "take out the w switch ... If the fifo has 8192, let's let the driver use it." **`grfdrv256`
+with `LD.Depth` 8,192 (`c45760ab`, still unpushed) is on both disk images** (rebuilt for each
+platform, identical to the builds compared before, targeted copy, copied back and compared); the
+Wildbits MAME boots it and runs the game. **`tempest w` is gone** (module 40,170 bytes).
+
+**Where the space went this session** (36,748 -> 40,170, file by file against `ec48bdf`): the well
+cache ~1,450 (`avg.a` capture, skip and cache; `gfx.a` `WellCom`, `WlRows`, `AvgLast`, `BmSend`;
+`text.a` hooks), the small-shape collapse ~900 (`AvShp` and its table), the SID output ~450,
+`tsnd` ~450, the sign-off's second line and the switches ~100; `BmWait` -48. **Cleanup candidates**:
+`tsnd` behind a build switch (~450), the `n` switch (~10), `AvgFlush` converting with `WlCv1`
+(~30), `AvShp`'s repeated range check (~8), the shape map at half the resolution (~64), the
+sign-off's second line (~100).
+
+## Cleanup 1-4 (2026-09-24, host and MAME)
+
+User: "do 1 through 4". **Module 40,170 -> 39,746 bytes (446 free).**
+1. **`tsnd` only in a `TSND` build** (`make EXTRA="-DTSND"`, 40,134 bytes: it still fits):
+   `TsMain` and its tables, and the start-up's parameter read. `tools/sndtest.py` assembles its own
+   `TSND` module into `src/build/` (the makefile's command) and leaves `src/tempest` alone;
+   `--game` runs `src/tempest`. (The routine was `Tsnd`: lwasm's case folding made it `TSND`.)
+2. **`tempest n` gone** (sound is settled).
+3. **`AvgFlush` converts its batch with `WlCv1`**, in place (now outside `AVWELL`).
+4. **`AvShp` no longer repeats the range check `_JS2` made.**
+
+Checked: `avgtest.py --collapse --well` 6,282 frames exact, fuzz 10,000 (both multiplies, random
+batches) 0 failed; `osrun.py` 60 s 16.3 game frames a second, every check right; `sndtest.py` tsnd
+2,699 and game 3,542 passes, 0 wrong; the Wildbits MAME: the game and its sign-off. On both disk
+images (with the 8,192 driver).
+
+## Hardware: the cleaned build with the 8,192 driver (user, 2026-09-24)
+
+`a1930b6` on the K2: **3,707 game frames, 15,263 passes in 254 s: 14.6 game frames and 60.1 passes
+a second; 9,563 line calls, 0 short** (4.1 passes and 2.6 calls a game frame). Between the cached
+89 s run (17.9; 3.4 and 2.0) and `tempest w`'s 196 s (12.9; 4.7 and 2.9): **play runs of different
+lengths reach different levels, so they cannot rank builds.** Proposed from now on: **an attract-mode
+benchmark** (start, no coin, 2 minutes, `q`), the same sequence every time, beside play for the feel.
+
+## The stick only when used; BUDPAS 12,600; RECUS stays (2026-09-24, host and MAME)
+
+User: "1 and 2" (the stick; re-tune `RECUS`). **`input.a`**: stick 0 (`SS.Joy`, ~400 µs a call)
+is read every pass only once it has shown a direction or a button (`JOYON`); until then, one look
+every `JOYLOOK` = 30 passes (half a second: a stick player's first push is noticed within that).
+`osrun.py`: GetStat calls 3,560 -> 1,825 in 30 s. **The time it frees goes to the drawing's budget:
+`BUDPAS` 12,300 -> 12,600.** The sweep (`osrun.py` 60 s each):
+
+| `BUDPAS` / `RECUS` | 12,300/150 | **12,600/150** | 12,300/140 | 12,600/140 | 12,300/130 | 12,600/130 |
+|---|---:|---:|---:|---:|---:|---:|
+| Game frames a second | 16.5 | **17.1** | 16.7 | 17.0 | 16.4 | 16.8 |
+| Ticks lost of 3,600 | 43 | **75** | 125 | 136 | 256 | 351 |
+
+**`RECUS` stays at 150**: lower only loses ticks now. With the well out of the loop the records
+left are the costly ones (dots, shapes, enemies), so 150 µs is about their real cost, not a margin.
+The model has always lost more ticks than the K2 (1.2% there, none on the hardware). Module 39,773
+bytes. On both disk images; the Wildbits MAME: the game and its sign-off (keyboard only there: the
+stick path waits for the K2). Two changes in one run, at the user's asking.
+
+## The attract baseline on the K2; the logo's drawings dropped (2026-09-24)
+
+**The attract benchmark on the K2** (`d975bb5`, the stick only when used, `BUDPAS` 12,600): **2
+minutes of attract (125 s by the sign-off): 1,780 game frames, 7,345 passes: 14.2 game frames and
+58.8 passes a second (~155 ticks lost, 2%); 4,572 line calls (2.6 a game frame), 0 short.** The
+baseline for later builds.
+
+**The logo** (user: "the Tempest marquee on the title screen draws really slow"): the zoom draws
+**19 copies of the logo** (its trail), six ROM pieces 19 times each, **646 records a drawing** for
+~10 s of the arcade's zoom; ~47 ms of interpreting alone, 5-6 passes a drawing, while its logic is
+one pass, and the game waits for each drawing. **A drawing that took `SKIPT` = 5 passes or more
+drops the next game frame's drawing** (its logic runs; the well's cache is forgotten, since the
+well may be rebuilt twice unseen). Play's drawings take 2-3 passes, so play is not touched. The
+user asked why the marquee is several `SS.BmLine` calls, not one: each call is a pass's worth
+(the budget), and the driver takes 255 records a call at most; one call would mean the whole
+logo interpreted first (~47 ms, three ticks without yielding), and the calls are ~3.6 ms of a
+~70 ms drawing. **`GFRAMS` now counts the game's frames** (its logic), drawn or dropped, and the
+sign-off's second line says the drawings dropped.
+
+`osrun.py`, 200 s of attract (no keys): **each logo zoom 1,081 ticks (18 s) before, 707 (11.8 s)
+now: 1.5x faster**, 55 drawings instead of 110; all of attract 12.5 -> 13.6 game frames a second;
+every check right. (The model's attract loses ~1,800 ticks in 200 s either way, against 2% on the
+K2: it charges the text screens more than the hardware costs.) The arcade's zoom is ~4 s:
+dropping two of three drawings when a drawing is very long would go further, choppier. Module
+39,851 bytes; on both disk images; the Wildbits MAME: the game and the new sign-off.
+
+## The SOL clock: lost ticks caught up (2026-09-24, host and MAME) — untested on hardware
+
+User: "Why do we care if it loses that tick?" (a lost pass is game time lost: timers, sound
+tempo, the frame pace), then "Then we can hook up the sol driver and get a signal for each tick?"
+and "you can mute the signal during a game pause". **This reverses 2026-09-23's choice** (section
+6.3 of the plan: SOLdrv weighed and not taken). SOLdrv and `/fSOL` are in the boot file; `scfg`
+uses them the same way.
+
+- **`platform.a` `SolOn`**: `/fSOL`, `SS.SOLIRQ` ($C3) with line 0 (the frame's first line, the
+  tick) and signal `SIGTK` = $A2; `Icpt` counts `TICKS`. **`frame.a` `MainLoop`**: the ticks since
+  the last pass (`TKMAX` 8 at most) run their virtual IRQs and go to `InFram`; none yet: `F$Sleep`
+  0 until a signal. So **a pass that runs long is caught up, not lost**, as the arcade's IRQ keeps
+  real time whatever the AVG does. No `/fSOL` (or an error): one pass a tick, as before.
+  **`PausWt`** mutes it (`SS.SOLMUTE` $C4) and, coming back, takes the ticks from then. `SolOff` on
+  every exit.
+- **`osrun.py` models SOLdrv**: `/fSOL`, the two calls, a signal a tick taken at the next os9 call
+  (150 µs guessed), `F$Sleep` 0 to the next tick. Every check right; **virtual IRQs 245.9 a
+  second** (the arcade's 246.1) whatever the passes do.
+- **The budget, swept with the clock in** (`osrun.py` 90 s): 11,000 16.0 game frames a second,
+  11,800 15.8, **12,600 17.7**, 13,400 17.4, 14,200 16.4, 15,000 16.0, **30,000 (no split) 19.5**
+  (longest pass 162 ms: the logo). Game time holds (245.8-245.9) in all. So the budget no longer
+  guards the clock: **it is a trade of smoothness** (sound, controls and the game's IRQs every tick)
+  against frames (+10% with no split).
+- **Both on the disk images, for the user to judge by feel**: `tempest` (the SOL clock, `BUDPAS`
+  12,600, 40,068 bytes) and **`tempnb`** (the same with `BUDPAS` 30,000 and the module name
+  `tempnb`: `make EXTRA="-DMODNB -DBUDPAS=30000"`). The Wildbits MAME delivers the signal:
+  **572 game frames in 29 s against ~414 before** (the slow clock seen there in the first session
+  was lost ticks), `tempnb` 586 with 733 line calls against 1,379. If `tempnb` feels as good, the
+  budget trackers (`Spend`, `RECUS`, `WCBUS`, the batch sizing) can go, and their space with them.
+
+## Hardware: the SOL clock, `tempest` (user, 2026-09-24)
+
+`cb0ed48` `tempest` (the SOL clock, `BUDPAS` 12,600) on the K2: **2,882 game frames, 10,640 passes
+in 178 s: 16.2 game frames and 59.8 passes a second; 6,391 line calls (2.2 a game frame), 0 short,
+214 drawings dropped** (7% of game frames: the logo, or play's heaviest). Passes under 60 no
+longer mean lost time. `tempnb` not yet reported.
+
+## No split: the budget machinery removed (2026-09-24, host and MAME)
+
+**`tempnb` on the K2 (user): "significantly better". 5,608 game frames, 16,360 passes in 276 s:
+20.3 game frames a second; 7,574 line calls (1.35 a game frame), 0 short, 7 dropped**, against
+`tempest`'s 16.2 in 178 s. So **a game frame is now two passes: the logic, then the drawing whole**
+(`frame.a`: `DRPEND` says a frame's logic ran; the next pass, a tick on, draws it, so the clear
+armed in the logic pass has run). **Removed**: the drawing coroutine and its 384-byte stack
+(`DrwBeg`, `DrwRes`, `DRWSTK`), `Spend`, `WORK`, `BUDPAS`, `BUDLOG`, `NxtBat` (batches are 255 again),
+`WlSend`, `TxSpnd`, and every estimate (`RECUS`, `WCBUS`, `WELUS`, `CALLUS`, `GLYUS`, `ROWUS`,
+`TXMUS`, `FLIPUS`, `MINBUS`, `MINREC`, `RECK`). The drop rule counts ticks now (`SKIPT` 5 ticks of
+drawing drop the next); `TKMAX` 32 (a superzapper blast is one pass of up to ~250 ms: 350-1,062
+records). avg.a is unchanged (its `AV.WCB` room still counts the well's records against their
+batch: harmless at 255). **Module 39,826 bytes (366 free).**
+
+`osrun.py` 85 s: **20.1 game frames a second, virtual IRQs 245.8 a second**, every check right;
+`sndtest.py` (now checking at either sleep) game 1,990 and tsnd 2,699 passes, 0 wrong; the Wildbits
+MAME: 589 game frames in 29 s, 696 line calls. **On both disk images as `tempest`; `tempnb` removed
+from them.**
+
+## Hardware: no split, the cleaned build (user, 2026-09-24)
+
+`0496149` on the K2: **4,230 game frames, 11,601 passes in 214 s: 19.8 game frames a second**
+(54.2 passes a second: long drawings are one pass now, their ticks caught up); **5,263 line calls
+(1.24 a game frame), 0 short, 5 dropped.** As `tempnb` (20.3 in 276 s), within play's spread.
+
+**The title zoom** (`osrun.py`, 200 s of attract): **550 ticks (9.2 s) a zoom, 103 of its 110
+frames drawn** (a logo drawing is now one pass of ~4-5 ticks and seldom reaches `SKIPT`), against
+707 (11.8 s, 55 drawn) with the split and drops, and 1,081 (18.0 s) at first: **~2x the original**;
+all of attract 17.8 game frames a second (13.6). The arcade's is ~4 s; a lower `SKIPT` would go
+faster, choppier, and would drop in play's heaviest moments too.
+
+## The logo's trail thinned (2026-09-24) — confirmed on the K2 (LOGSKP 2)
+
+User: "Logo looks faster, but it would be nice to make it even faster. What if we removed every
+third TEMPEST or every fourth one". The trail is the list at `$101`: per copy a `SCAL`, a colour,
+and **`JSRL $FA7`**, the whole logo in ROM, which **starts with a `CNTR`**; after the last copy the
+list does its own `CNTR` and `SCAL`. So a copy skipped leaves the rest untouched. **`avg.a`
+`LOGSKP`**: every `LOGSKP`-th call to `$FA7` in a frame is not run (a counter in the page, `AV.LGK`,
+reset by `AvgRun`); **`frame.a` sets 4** (15 of 19 copies drawn). `PortAVG(logskip=N)` specifies
+it; `avgtest.py --logskip 4`: attract 2,801 frames exact, fuzz 2,000 (lists call `$FA7` too)
+clean; the worst attract frame 48.7 -> 39.1 ms. Records a logo frame 646 -> 510 (every 3rd: 442).
+Pictures side by side: the trail still reads as one, a little sparser.
+
+`osrun.py` 200 s of attract, **per logo frame: 5.3 ticks (all copies), 4.4 (every 4th skipped,
+17% faster), 4.1 (every 3rd, 24%)**; a whole zoom ~9.8 s -> ~8.2 s (every 3rd ~7.4 s). The frame's
+fixed costs (the logic pass, the text, the flip) keep the gain below the records cut. Every 3rd is
+`LOGSKP` 3. The game (`osrun.py` 40 s): 20.1 game frames a second, every check right. Module
+39,852 bytes; on both disk images; the Wildbits MAME: the game and its sign-off.
+
+**Then `LOGSKP` 2** (user: "Let's skip every other one"): 10 of the 19 copies drawn, **306 records
+a logo frame (612 whole)**; the trail sparser, some colour bands gone, still a trail.
+`avgtest.py --logskip 2`: attract 2,801 frames exact, fuzz 1,000 clean. On both disk images; the
+Wildbits MAME: the game and its sign-off.
+
+## The logo's quiet end shortened (2026-09-24) — confirmed on the K2
+
+User: the final phase is slow "as the multiple tempests merge together"; "Can we do something about
+the quiet phase? The zoom looks good up to that point." Measured in the arcade capture: the zoom
+ends at video frame ~2121; then **the merge** (to ~2196, 1.25 s: the trail's copies vanish one
+every 2 game frames) and **a hold** (to ~2328, 2.2 s: the logo still). Atari's `LOGPRO` (ALSCO2):
+the front copy steps 1 a frame to its destination (`NEARY` below `$30`), the trail's end (`FARY`)
+1 a frame after it; the whole logo is `QTMPAUS` = 223 game frames (state `CPAUSE`, `PSCALE` 0: one
+a frame), so on the port it stretches with the frame rate. **The port's `LOGPRO`, with
+`LOGOQK` (set in `frame.a`, so the translation tests still build Atari's code)**: once the front
+has arrived, the trail closes `LOGMS` = 4 a frame; once merged, `QTMPAUS` is held to `LOGHD` = 27
+frames at most. The zoom itself is untouched. `osrun.py` (130 s of attract, the logo display
+state `$14`): **635 ticks (10.6 s) -> 475 (7.9 s)**. `xlattest.py --src -n 40` byte-exact. Module
+39,884 bytes; on both disk images; the Wildbits MAME: the game and its sign-off.
+
+**The hold lengthened (2026-09-24) — confirmed on the K2** ("Pretty good! Looking good!"). User, on the K2: "That
+looks a ton better. Could probably hold for about 3 seconds longer at the end." A cap could not do
+it (Atari's `QTMPAUS` has only ~80 frames left at the merge), so the port now **sets** `QTMPAUS` to
+`LOGHD` once, on the frame the trail closes on the arrived front (`FARY` changes to `NEARY`, below
+`$30`). `LOGHD` 90: the hold runs ~21 game frames a second in the model, so 63 more frames = 3 s.
+`osrun.py` logo state: **475 ticks -> 655 (10.9 s)**. Module 39,888 bytes; on both disk images; the
+Wildbits MAME: the game and its sign-off.
 
 ## Open items
 
 1. The line-engine holes (FPGA developer).
 2. `tline` for stage 1, when the core is fixed: above all the per-record cost.
 3. `SS.MsDelta` storage (5 bytes of vtio statics, 242 → 247 of 256), and its driver code.
-4. The frame rate of the split loop (14 a second in the model); the lost tick a game frame on the
-   K2 and the slow clock in MAME: the clear's wait for vertical blank, fixed and confirmed on the
-   K2, 15.4 game frames a second ("Optimising").
+4. The frame rate: settled for now. No split, the SOL clock catching up lost ticks, the well out
+   of the loop: K2 19.8 game frames a second (4,230 in 214 s, 5 dropped). Later levels still slow
+   a little as enemies are added; the ideas not taken: the well's colours through a CLUT instead
+   of a redraw, faster glyphs, tline S.
 5. The coprocessor divide's read-after-write timing, and its remainder, on hardware (D6 pilot,
    "Unchecked"; `DIVF` reads the remainder). Now also the multiplier's (`avg.a`, approved).
 6. The hardware half: the module itself can now be the first picture (`make install DSK=`, the
