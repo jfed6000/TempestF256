@@ -378,6 +378,8 @@ class Host(CPU6809):
             self.dma_halt()
             if self.dma and self.dma[0] == n and self.cycles < self.dma[2]:
                 self.errors.append("SS.BmLine into bitmap %d before its clear has run" % n)
+            self.sync_out()                 # what the program wrote through a window first (the
+                                            # text bitmap is drawn both ways): one memory on the F256
             for i in range(cnt):
                 p = self.x + 8 * i
                 x0, x1 = self.rd16(p), self.rd16(p + 2)
@@ -440,10 +442,13 @@ class Host(CPU6809):
                         if 0 <= x < W and 0 <= y < H:
                             want[y * W + x] = clut
         have = self.bm_bytes(2)
-        bad = sum(1 for i in range(W * H) if have[i] != want[i])
-        if bad:
-            self.errors.append("frame %d: the text bitmap differs from its list in %d pixels"
-                               % (self.flips, bad))
+        if "WLST" in sym and self.hires[2]:
+            self.check_well(want, have)
+        else:
+            bad = sum(1 for i in range(W * H) if have[i] != want[i])
+            if bad:
+                self.errors.append("frame %d: the text bitmap differs from its list in %d pixels"
+                                   % (self.flips, bad))
         cram = self.mem[d + sym["CLRSHD"]:d + sym["CLRSHD"] + 16]
         for i in range(256):
             r, g, b = clut_int(cram, i)
@@ -478,6 +483,58 @@ class Host(CPU6809):
                       if i >= len(prev) or i >= len(texts) or prev[i] != texts[i])
         self.text_stats = getattr(self, "text_stats", []) + [(len(texts), changed)]
         self.prev_texts = texts
+
+    def well_records(self, addr, n):
+        """n records (320, gfx.a's form) at addr: (x0, y0, x1, y1, nibble) as sent at 640"""
+        out = []
+        for k in range(n):
+            b = self.mem[addr + 8 * k:addr + 8 * k + 8]
+            x0, x1 = struct.unpack(">hh", bytes(b[0:4]))
+            out.append((2 * x0, b[4], 2 * x1, b[5], min((b[6] >> 4) + 1, 15)))
+        return out
+
+    def check_well(self, want, have):
+        """gfx.a WellCom (AVWELL): the text bitmap holds the text list and, while WLST says the well
+        is in the back layer, WLOLD's lines; where glyph and well, or two well records, meet, any of
+        their colours.  Nothing else lit.  With the lines instead, this frame's captured well
+        records must be among the records the shown bitmap was drawn with."""
+        sym, d = self.sym, DATA
+        cached = self.mem[d + sym["WLST"]]
+        wellcol = {}
+        if cached:
+            for (x0, y0, x1, y1, nib) in self.well_records(d + sym["WLOLD"], self.mem[d + sym["WLON"]]):
+                for (x, y) in av.bresenham(x0, y0, x1, y1):
+                    wellcol.setdefault((x, y), set()).add(nib)
+        bad = 0
+        for y in range(H):
+            for x in range(2 * W):
+                o = y * W + x // 2
+                sh = 4 if x % 2 == 0 else 0
+                h, t = (have[o] >> sh) & 15, (want[o] >> sh) & 15
+                w = wellcol.get((x, y))
+                if w:
+                    ok = h in w or (t and h == t) or (t and len(w) and h != 0)
+                else:
+                    ok = h == t
+                bad += not ok
+        if bad:
+            self.errors.append("frame %d: the text bitmap differs from its text%s in %d dots" %
+                               (self.flips, " and cached well" if cached else "", bad))
+        self.well_frames = getattr(self, "well_frames", [0, 0])
+        self.well_frames[1 if cached else 0] += 1
+        vwin = self.rd16(d + sym["VWIN"])
+        n = self.mem[d + sym["AVGPG"] + sym["AV.WNC"]]
+        sent = {r[:5] for r in self.frame_records if r[5] == self.layers[1]}
+        new = self.well_records(vwin + 0x1E00, n)
+        if cached:          # the records not in the back layer's colour: with the lines
+            old = self.well_records(d + sym["WLOLD"], self.mem[d + sym["WLON"]])
+            need = [r for r, o in zip(new, old) if r[4] != o[4]]
+        else:
+            need = new
+        miss = [r for r in need if r not in sent]
+        if miss:
+            self.errors.append("frame %d: %d of the well's records not drawn with the lines"
+                               % (self.flips, len(miss)))
 
     def picture(self, path):
         # the layers front (0) to back (2): the first non-transparent dot wins; a tile map shows nothing
@@ -654,6 +711,8 @@ def main():
         for e in h.errors[:20]:
             print("  " + e)
         sys.exit(1)
+    if getattr(h, "well_frames", None):
+        print("the well: with the lines %d game frames, in the back layer %d" % tuple(h.well_frames))
     print("checks: text bitmap, CLUT and line bitmap right after every game frame's drawing")
 
 

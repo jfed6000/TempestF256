@@ -262,7 +262,9 @@ bcerr               leas      2,s
 
 ********************************************************************
 * AvgFlush - the interpreter's batch (avg.a): X = the records, B = the
-*   count (1-255), U = the data area, DP its page; may clobber all but
+*   count (1-255; with AVWELL 0-255, and AVGPG+AV.WCB records the well's
+*   capture took, interpreted but not in the batch, are charged too), U =
+*   the data area, DP its page; may clobber all but
 *   S.  SS.BmLine into the hidden bitmap until every record is drawn:
 *   the driver returns short when the line engine's FIFO lacks room.
 *   A call that draws none 20 times running, or an error (our terminal
@@ -271,6 +273,18 @@ bcerr               leas      2,s
 *   hand the tick back to the loop between calls.
 ********************************************************************
 AvgFlush
+                    ifdef     AVWELL
+                    lda       AVGPG+AV.WCB,u      the well's records, interpreted (avg.a): their time
+                    beq       af0
+                    pshs      b,x
+                    ldb       #WCBUS
+                    mul
+                    ldx       #MINBUS
+                    lbsr      Spend
+                    puls      b,x
+af0                 tstb
+                    lbeq      NxtBat              (only the well's)
+                    endc
                     ifne      HIRES
                     pshs      b,x                 the batch into 640 and nibbles, once
                     pshs      b
@@ -298,14 +312,27 @@ hx2                 stb       6,x
                     leas      1,s
                     puls      b,x
                     endc
-                    lda       #20
+                    lda       SHOWN,u             into the hidden bitmap, RECUS a record
+                    eora      #1
+                    sta       BSBM,u
+                    lda       #RECUS
+                    sta       BSUS,u
+                    bsr       BmSend
+                    lbra      NxtBat
+
+* BmSend - X = records (640, nibbles), B = the count (1-255): SS.BmLine
+*   into bitmap BSBM until every record is drawn, each call charged to
+*   the pass's budget (Spend: B records at BSUS microseconds and the
+*   call).  The driver returns short when the line engine's FIFO lacks
+*   room; a call that draws none 20 times running, or an error (our
+*   terminal hidden), gives up: lines lost, nothing hangs.  A, B, X, Y
+*   clobbered.
+BmSend              lda       #20
                     sta       FLSHN,u
 af1                 pshs      b,x                 ,s = records left, 1,s = the next
-                    lda       SHOWN,u
-                    eora      #1
-                    tfr       a,b
+                    ldb       BSBM,u
                     clra
-                    tfr       d,y                 Y = the hidden bitmap
+                    tfr       d,y                 Y = the bitmap
                     ldb       ,s
                     pshs      u
                     tfr       d,u                 U = the count
@@ -316,7 +343,7 @@ af1                 pshs      b,x                 ,s = records left, 1,s = the n
                     puls      u
                     bcs       afx
                     pshs      b                   the pass's budget: B records and a call
-                    lda       #RECUS
+                    lda       BSUS,u
                     mul
                     addd      #CALLUS
                     ldx       #MINBUS
@@ -341,9 +368,301 @@ af3                 dec       FLSHN,u
 af4                 puls      b,x
                     tstb
                     bne       af1
-                    bra       NxtBat
-afx                 puls      b,x
-                    bra       NxtBat
+                    rts
+afx                 puls      b,x,pc
+
+                    ifdef     AVWELL
+********************************************************************
+* The well (docs/status.md, "The well"): avg.a captures the records
+*   of the well's sub-list (AV.WNC of them at window A + $1E00, WNEW),
+*   and it is drawn once into the text bitmap (2), on the back layer,
+*   while its geometry holds: WellCom, after the interpreter, before
+*   the flip.  WLOLD keeps the well as last drawn (WLON records), WLST
+*   says it is in the back layer.
+*     In the back layer, the same geometry: the records whose colour
+*       is not the back layer's (the lane the player is on, the pulsars'
+*       flashes) go with this frame's lines, on top; the back layer is
+*       left alone, and the next frame's clear takes them away (the user's
+*       idea, 2026-09-23).  WLOLD keeps the back layer's colours.
+*     In the back layer, the geometry changed (the zoom; no well; an
+*       overflow): the old well is drawn in 0 there (erased), the text
+*       redrawn whole (TXALL: the erase cut it), and this frame's well
+*       goes with the lines.
+*     With the lines: once the geometry has held WSTAB frames running,
+*       the well goes into the back layer; until then with the lines.
+*   Text erased over the well cuts it: WlRows, from TxCommit between its
+*   erase and its draw, draws the well's records on the erased rows again.
+********************************************************************
+WSTAB               equ       2                   frames the geometry must hold before the back layer
+WELUS               equ       50                  a well record sent: converted and drawn (no interpreting)
+                    ifndef    WCBUS
+WCBUS               equ       110                 a well record interpreted and captured (osrun.py: 50-90 lost ticks)
+                    endc
+BMTXT               equ       2                   the text bitmap, on the back layer
+
+* WlCv1 - the record at X into Y: 640 and a nibble, or with A non-zero
+*   the nibble 0 (an erase).  X and Y advance 8.  A, B clobbered.
+WlCv1               pshs      a
+                    ldd       ,x
+                    ifne      HIRES
+                    lslb
+                    rola
+                    endc
+                    std       ,y
+                    ldd       2,x
+                    ifne      HIRES
+                    lslb
+                    rola
+                    endc
+                    std       2,y
+                    ldd       4,x
+                    std       4,y
+                    tst       ,s
+                    bne       wv2
+                    ldb       6,x                 colour << 4 | intensity
+                    ifne      HIRES
+                    lsrb
+                    lsrb
+                    lsrb
+                    lsrb
+                    incb
+                    cmpb      #16
+                    blo       wv3
+                    ldb       #15
+                    endc
+                    bra       wv3
+wv2                 clrb
+wv3                 stb       6,y
+                    clr       7,y
+                    leax      8,x
+                    leay      8,y
+                    puls      a,pc
+
+* WlSend - X = records (640, nibbles), B = the count: room in the pass
+*   for them and the call first (Spend may give the tick back), then
+*   BmSend at WELUS a record.
+WlSend              pshs      b,x
+                    lda       #WELUS
+                    mul
+                    addd      #CALLUS
+                    tfr       d,x
+                    ldd       #0
+                    lbsr      Spend
+                    lda       #WELUS
+                    sta       BSUS,u
+                    puls      b,x
+                    lbra      BmSend
+
+* WlAll - X = records, B = the count (1-56), A non-zero to erase: all of
+*   them into the record batch (window A + $1000), then to bitmap BSBM.
+WlAll               pshs      b                   the count, and a copy to count down
+                    pshs      b
+                    ldy       VWIN,u
+                    leay      $1000,y
+wa1                 bsr       WlCv1
+                    dec       ,s
+                    bne       wa1
+                    leas      1,s
+                    puls      b
+                    ldx       VWIN,u
+                    leax      $1000,x
+                    bra       WlSend
+
+* WellCom - the frame's well (above).  A, B, X, Y clobbered.
+WellCom             ldx       VWIN,u
+                    leax      $1E00,x
+                    stx       WLNEW,u
+                    clr       WLSAM,u
+                    ldb       AVGPG+AV.WNC,u
+                    stb       WLN,u
+                    beq       wl2                 no well: not the same
+                    tst       AVGPG+AV.WOVF,u
+                    bne       wl2
+                    cmpb      WLON,u
+                    bne       wl2
+                    leay      WLOLD,u             the same geometry, record for record?
+                    pshs      b
+wl1                 ldd       ,x
+                    cmpd      ,y
+                    bne       wl1n
+                    ldd       2,x
+                    cmpd      2,y
+                    bne       wl1n
+                    ldd       4,x
+                    cmpd      4,y
+                    bne       wl1n
+                    leax      8,x
+                    leay      8,y
+                    dec       ,s
+                    bne       wl1
+                    inc       WLSAM,u
+wl1n                leas      1,s
+wl2                 lda       #BMTXT
+                    sta       BSBM,u
+                    tst       WLST,u
+                    lbeq      wl5
+                    tst       WLSAM,u             in the back layer
+                    beq       wl4
+                    lda       SHOWN,u             the same: the records not in the back layer's
+                    eora      #1                  colour, with this frame's lines
+                    sta       BSBM,u
+                    ldx       WLNEW,u
+                    leay      WLOLD,u
+                    clr       WLK,u
+                    ldd       VWIN,u
+                    addd      #$1000
+                    std       WLDST,u
+                    ldb       WLN,u
+                    stb       WLI,u
+wl3                 lda       6,x
+                    cmpa      6,y
+                    beq       wl3n
+                    pshs      x,y
+                    ldy       WLDST,u
+                    clra
+                    lbsr      WlCv1
+                    sty       WLDST,u
+                    puls      x,y
+                    inc       WLK,u
+wl3n                leax      8,x
+                    leay      8,y
+                    dec       WLI,u
+                    bne       wl3
+                    ldb       WLK,u
+                    beq       wl3x
+                    ldx       VWIN,u
+                    leax      $1000,x
+                    lbsr      WlSend
+wl3x                rts                           (WLOLD stays the back layer's)
+wl4                 ldb       WLON,u              changed: the old one out of the back layer
+                    beq       wl4a
+                    leax      WLOLD,u
+                    lda       #1
+                    lbsr      WlAll
+wl4a                clr       WLST,u
+                    clr       WLSTB,u
+                    inc       TXALL,u             (the erase cut the text: all of it again)
+                    bra       wl6
+wl5                 tst       WLSAM,u             with the lines
+                    beq       wl5a
+                    inc       WLSTB,u
+                    lda       WLSTB,u
+                    cmpa      #WSTAB
+                    blo       wl6
+                    ldx       WLNEW,u             settled: into the back layer
+                    ldb       WLN,u
+                    clra
+                    lbsr      WlAll
+                    inc       WLST,u
+                    bra       wl9
+wl5a                clr       WLSTB,u
+wl6                 ldb       WLN,u               this frame's well with the lines
+                    beq       wl9
+                    lda       SHOWN,u
+                    eora      #1
+                    sta       BSBM,u
+                    ldx       WLNEW,u
+                    clra
+                    lbsr      WlAll
+wl9                 ldb       WLN,u               WNEW is now the well last seen
+                    stb       WLON,u
+                    beq       wlx
+                    ldx       WLNEW,u
+                    leay      WLOLD,u
+                    lslb                          4 words a record
+                    lslb
+                    pshs      b
+wl9a                ldd       ,x++
+                    std       ,y++
+                    dec       ,s
+                    bne       wl9a
+                    leas      1,s
+wlx                 rts
+
+* WlRows - from TxCommit, after its erase: the back layer's well records
+*   on the rows it erased (ROWMSK, from the first to the last marked),
+*   drawn again before the new text goes on.  A, B, X, Y clobbered.
+WlRows              tst       WLST,u
+                    lbeq      wrx
+                    tst       TXERS,u
+                    lbeq      wrx
+                    leax      ROWMSK,u            the first row erased
+                    clrb
+wr1                 lda       b,x
+                    bne       wr2
+                    incb
+                    cmpb      #30
+                    blo       wr1
+                    lbra      wrx
+wr2                 pshs      b
+                    clrb
+wr2a                lsra
+                    bcs       wr2b
+                    incb
+                    bra       wr2a
+wr2b                stb       WLT,u
+                    puls      b
+                    lslb
+                    lslb
+                    lslb
+                    addb      WLT,u
+                    stb       WLE0,u
+                    ldb       #29                 the last
+wr3                 lda       b,x
+                    bne       wr4
+                    decb
+                    bra       wr3
+wr4                 pshs      b
+                    ldb       #7
+wr4a                lsla
+                    bcs       wr4b
+                    decb
+                    bra       wr4a
+wr4b                stb       WLT,u
+                    puls      b
+                    lslb
+                    lslb
+                    lslb
+                    addb      WLT,u
+                    stb       WLE1,u
+                    clr       WLK,u               the records whose rows meet them
+                    ldd       VWIN,u
+                    addd      #$1000
+                    std       WLDST,u
+                    ldb       WLON,u
+                    beq       wrx
+                    stb       WLI,u
+                    leax      WLOLD,u
+wr5                 lda       4,x                 A = the record's first row, B its last
+                    cmpa      5,x
+                    bls       wr5a
+                    lda       5,x
+                    ldb       4,x
+                    bra       wr5b
+wr5a                ldb       5,x
+wr5b                cmpb      WLE0,u
+                    blo       wr5n
+                    cmpa      WLE1,u
+                    bhi       wr5n
+                    pshs      x
+                    ldy       WLDST,u
+                    clra
+                    lbsr      WlCv1
+                    sty       WLDST,u
+                    puls      x
+                    inc       WLK,u
+wr5n                leax      8,x
+                    dec       WLI,u
+                    bne       wr5
+                    ldb       WLK,u
+                    beq       wrx
+                    lda       #BMTXT
+                    sta       BSBM,u
+                    ldx       VWIN,u
+                    leax      $1000,x
+                    lbra      WlSend
+wrx                 rts
+                    endc
 
 * NxtBat - AVGPG+AV.RMAX, the next batch's size: the records the pass's
 *   budget still covers, (WORK - CALLUS) / RECUS, at least MINREC, at

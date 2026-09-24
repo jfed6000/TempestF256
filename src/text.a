@@ -45,7 +45,13 @@ GL.LEN              equ       26
 *   and redrawn every two seconds (0.6 s of it, on the K2).
 ********************************************************************
 TxCommit            lbsr      TxMatch             Z = 1: nothing changed (Draw left room for it)
-                    lbeq      tcx                 (then the lists are the same: no copy either)
+                    bne       tcgo
+                    ifdef     AVWELL
+                    tst       TXALL,u             (unless all of it must be drawn again)
+                    bne       tcgo
+                    endc
+                    lbra      tcx                 (then the lists are the same: no copy either)
+tcgo
                     ldd       #TXMUS
                     ldx       #GLYUS+11*ROWUS     room for the biggest glyph?
                     lbsr      Spend
@@ -77,7 +83,23 @@ tc2a                leay      6,y
                     addd      #1
                     bra       tc1
 * pass 2: draw what changed, and what an erase may have touched
-tc3a                ldx       VWIN,u
+tc3a
+                    ifdef     AVWELL
+                    lbsr      WlRows              the well cut by the erase, drawn again under the text
+                    tst       TXALL,u             everything again (the well's erase cut the text):
+                    beq       tc3c                every row marked
+                    clr       TXALL,u
+                    lda       #1
+                    sta       TXERS,u
+                    leax      ROWMSK,u
+                    ldb       #30
+                    lda       #$FF
+tc3d                sta       ,x+
+                    decb
+                    bne       tc3d
+tc3c
+                    endc
+                    ldx       VWIN,u
                     leax      TXLIST,x
                     ldd       #0
 tc4                 cmpd      AVGPG+AV.TCNT,u     every new entry

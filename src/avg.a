@@ -90,6 +90,17 @@ AV.RMAX	equ	113			records this batch holds: the caller's before AvgRun (0: RBATC
 AV.SHP	equ	114			2: AvShp: the shape's AvSTab entry
 AV.STAB	equ	116			2: AvSTab (module; AVCOLL)
 AV.SMAP	equ	118			2: AvSMap (module; AVCOLL)
+AV.WCAP	equ	120			AVWELL: non-zero while the well's records are captured
+AV.WSP	equ	121			the AVG stack depth its call was made at
+AV.SRP	equ	122			2: the line batch's AV.RPTR, kept while capturing
+AV.SRL	equ	124			and its AV.RLFT
+AV.WNC	equ	125			out: the well's records captured (window A + $1E00)
+AV.WOVF	equ	126			out: non-zero if the capture filled (the rest went to the lines)
+AV.WBUF	equ	127			2: the capture buffer (window A + $1E00)
+AV.WENA	equ	129			in: non-zero = capture the well (the caller's, as AV.RMAX)
+AV.WCB	equ	130			the well's records interpreted since the last flush: they took
+*					the batch's room, and AvgFlush charges them (not in the batch)
+AV.WN0	equ	131			AV.WNC when this capture began
 
 * AvSTab's entries (avgtab.a, tools/avgview.py shape_table)
 SH.TGT	equ	0			2: the target (word address); $FFFF ends the table
@@ -106,6 +117,13 @@ SH.LI	equ	18			and its intensity ($FF: STAT's)
 SH.AC	equ	19			the colour << 4 it leaves ($FF: unchanged)
 SH.AI	equ	20			the intensity it leaves ($FF: unchanged)
 SHLEN	equ	21
+
+* The well (AVWELL; status.md, "The well"): the top-level list's JSRL to SWWELL (word $205), the
+* switch into the active well buffer.  While AV.WENA is set, the records made inside that call,
+* to the RTSL back out of it, go to window A + $1E00 (WMAX at most: the WMAXth ends the capture,
+* an overflow, and the rest go to the lines) for gfx.a's WellCom.  PortAVG(well=True) specifies it.
+WELLT	equ	$205
+WMAX	equ	56
 
 * AvgRun - interpret the display list in window A once.
 * In: U = the data area (VWIN set; page-aligned).  Out: AVGPG+AV.TCNT texts at window A + $1800,
@@ -130,6 +148,10 @@ AvgRun	pshs	u,dp
 	stx	<AV.RPTR
 	leax	$0800,x
 	stx	<AV.TPTR
+	ifdef	AVWELL
+	leax	$0600,x			window A + $1E00: the well's capture
+	stx	<AV.WBUF
+	endc
 	leax	VROM,pcr
 	stx	<AV.VROM
 	leax	AvGMap,pcr
@@ -170,6 +192,12 @@ AvgRun	pshs	u,dp
 	sta	<AV.SCL
 	std	<AV.LSCL
 	sta	<AV.LCL
+	ifdef	AVWELL
+	sta	<AV.WCAP
+	sta	<AV.WNC
+	sta	<AV.WOVF
+	sta	<AV.WCB
+	endc
 	ldd	#MAXJMP
 	std	<AV.JMP
 	lda	<AV.RMAX		the first batch: the caller's size, or RBATCH
@@ -635,9 +663,25 @@ _AS3	ldb	,y			Z in bits 7-5
 	lbra	AvZ
 
 * AvFlsh - hand the batch to AvgFlush, with the data area's U and DP.
-AvFlsh	lda	<AV.RMAX
+AvFlsh
+	ifdef	AVWELL
+	tst	<AV.WCAP		the capture is full: an overflow, and it ends
+	beq	_AF0
+	inc	<AV.WOVF
+	bra	AvWEnd
+_AF0
+	endc
+	lda	<AV.RMAX
 	suba	<AV.RLFT
+	ifdef	AVWELL
+	suba	<AV.WCB		the batch's own (the well's took room, not places)
+	bne	_AF2
+	tst	<AV.WCB
 	beq	_AF1
+_AF2
+	else
+	beq	_AF1
+	endc
 	tfr	a,b
 	pshs	y,u,dp
 	ldx	<AV.RBUF
@@ -648,11 +692,59 @@ AvFlsh	lda	<AV.RMAX
 	puls	b
 	lbsr	AvgFlush
 	puls	y,u,dp
+	ifdef	AVWELL
+	clr	<AV.WCB
+	endc
 	ldx	<AV.RBUF
 	stx	<AV.RPTR
 	lda	<AV.RMAX		the next batch's size (AvgFlush may have changed it)
 	sta	<AV.RLFT
 _AF1	rts
+
+	ifdef	AVWELL
+* AvWBeg - records to the well's capture from here, after any a call before made: the line
+*   batch's place kept.
+AvWBeg	ldd	<AV.RPTR
+	std	<AV.SRP
+	lda	<AV.RLFT
+	sta	<AV.SRL
+	ldb	<AV.WNC
+	lda	#8
+	mul
+	addd	<AV.WBUF
+	std	<AV.RPTR
+	lda	#WMAX
+	suba	<AV.WNC
+	sta	<AV.RLFT
+	lda	<AV.SP
+	sta	<AV.WSP
+	lda	<AV.WNC
+	sta	<AV.WN0
+	inc	<AV.WCAP
+	rts
+* AvWEnd - the capture ends: its count (all calls') to AV.WNC, the line batch back, less the room
+*   this capture's records took (AV.WCB); a batch left with none is flushed.  X, Y kept.
+AvWEnd	lda	#WMAX
+	suba	<AV.RLFT
+	sta	<AV.WNC
+	suba	<AV.WN0		A = this capture's records
+	cmpa	<AV.SRL		the room they took: at most the batch's
+	bls	_WE0
+	lda	<AV.SRL
+_WE0	pshs	a
+	adda	<AV.WCB
+	sta	<AV.WCB
+	ldd	<AV.SRP
+	std	<AV.RPTR
+	clr	<AV.WCAP
+	lda	<AV.SRL
+	suba	,s+
+	bne	_WE1
+	clr	<AV.RLFT		no room left: flush now
+	lbra	AvFlsh
+_WE1	sta	<AV.RLFT
+	rts
+	endc
 
 * STAT and SCAL.
 AvStat	lda	1,y
@@ -775,7 +867,20 @@ _JS3
 	ldd	<AV.JMP
 	subd	#1
 	std	<AV.JMP
-	beq	AvStop
+	lbeq	AvStop
+	ifdef	AVWELL
+	tst	<AV.WENA		the call into the well: capture it
+	beq	_JS4
+	tst	<AV.WCAP
+	bne	_JS4
+	tst	<AV.WOVF		(full: no more)
+	bne	_JS4
+	ldd	<AV.T
+	cmpd	#WELLT
+	bne	_JS4
+	lbsr	AvWBeg
+_JS4
+	endc
 	ldb	<AV.SP
 	andb	#3
 	lslb
@@ -819,6 +924,15 @@ AvRtsl	ldd	<AV.JMP
 	lsla
 	leax	AV.STK,u
 	ldy	a,x
+	ifdef	AVWELL
+	tst	<AV.WCAP		back out of the well's call: the capture ends
+	beq	_RT1
+	lda	<AV.SP
+	cmpa	<AV.WSP
+	bne	_RT1
+	lbsr	AvWEnd
+_RT1
+	endc
 	lbra	AvLoop
 
 AvJmpl	lda	1,y
@@ -835,7 +949,14 @@ AvJmpl	lda	1,y
 	lbra	AvLoop
 
 AvHalt	inc	<AV.END
-AvStop	lbsr	AvFlsh
+AvStop
+	ifdef	AVWELL
+	tst	<AV.WCAP		the list ended inside the well: the capture ends
+	beq	_SP1
+	lbsr	AvWEnd
+_SP1
+	endc
+	lbsr	AvFlsh
 	puls	u,dp,pc
 
 * AvGlyph - A = the glyph; B's size from AV.BS (0: big).  AvGTab: 9 bytes a glyph and size, the

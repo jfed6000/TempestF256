@@ -402,8 +402,12 @@ class PortAVG:
     MAXTXT = 256
     DROPDOTS = True            # False: every record (for --compare against the float pipeline)
 
-    def __init__(self, rom, glyphs=True, collapse=False):
+    WELLT = 0x205              # SWWELL: the top-level list's call into the active well buffer
+    WMAX = 56                  # records a well capture holds (avg.a AvWBeg; the well is 48)
+
+    def __init__(self, rom, glyphs=True, collapse=False, well=False):
         self.rom = rom
+        self.well = well           # capture the well (avg.a AVWELL): its records to self.wrecs
         self.gmap = {}             # target word -> glyph index (first VGMSGA entry using it)
         self.gtab = {}             # (index, big) -> (dcol, drow, scale_after, intensity or 0)
         if glyphs:
@@ -421,6 +425,20 @@ class PortAVG:
         q = q_for(0, 0)
         col, row = 160 << 8, 120 << 8
         recs, texts = [], []
+        wrecs, wcap, wsp, wovf = [], False, 0, False
+        last = None                # the last record sent, to either list (avg.a AV.LEX/LEY/LCL)
+
+        def emit(rec):
+            # a record: to the well's capture while it runs (the WMAXth ends it, an overflow), else
+            # to the line list
+            nonlocal wcap, wovf, last
+            last = rec
+            if wcap:
+                wrecs.append(rec)
+                if len(wrecs) == self.WMAX:
+                    wcap, wovf = False, True
+            else:
+                recs.append(rec)
         st = {"instructions": 0, "vectors": 0, "glyphs": 0, "clipped": 0, "dropped": 0, "full": 0,
               "ended": 0, "centred": 0, "statint": 0, "dots": 0, "collapsed": 0}
         self.trace = []
@@ -450,8 +468,8 @@ class PortAVG:
                 clut = ((color & 0xF) << 4) | inten
                 if not inten:
                     pass
-                elif (self.DROPDOTS and ex == 0 and ey == 0 and recs and recs[-1][4] == clut and
-                        recs[-1][2:4] == (c0, r0)):
+                elif (self.DROPDOTS and ex == 0 and ey == 0 and last and last[4] == clut and
+                        last[2:4] == (c0, r0)):
                     st["dots"] += 1           # the last record's end again, in its colour
                 else:
                     c = clip_int(c0, r0, pix(col), pix(row))
@@ -460,7 +478,7 @@ class PortAVG:
                     else:
                         if c != (c0, r0, pix(col), pix(row)):
                             st["clipped"] += 1
-                        recs.append(c + (clut,))
+                        emit(c + (clut,))
             elif op == 1:
                 st["ended"] = 1
                 break
@@ -507,7 +525,7 @@ class PortAVG:
                         for r in range(rt, rb + 1):
                             c = clip_int(cl, r, cr, r)
                             if c is not None:
-                                recs.append(c + (clut,))
+                                emit(c + (clut,))
                     col = wrap(col + tm(e["net"][0]), 24)
                     row = wrap(row - tm(e["net"][1]), 24)
                     if e["ac"] is not None:
@@ -516,6 +534,9 @@ class PortAVG:
                         intensity = e["ai"]
                     continue
                 jumps -= 1
+                if self.well and not wcap and not wovf and t == self.WELLT and jumps:
+                    wcap, wsp = True, sp          # the well: until the RTSL back to this depth;
+                                                  # another call adds to the same capture
                 stack[sp & 3] = pc
                 sp = (sp + 1) & 0xF
                 pc = t
@@ -523,6 +544,8 @@ class PortAVG:
                 jumps -= 1
                 sp = (sp - 1) & 0xF
                 pc = stack[sp & 3]
+                if wcap and sp == wsp:
+                    wcap = False
             else:
                 jumps -= 1
                 pc = w & 0x1FFF
@@ -531,6 +554,7 @@ class PortAVG:
                     break
         self.stats = st
         self.state = (col, row, bs, scale, color, intensity, sp)
+        self.wrecs, self.wovf = wrecs, wovf
         return recs, texts
 
 

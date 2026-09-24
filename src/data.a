@@ -79,6 +79,24 @@ TSTIM               rmb       1                   tsnd: ticks left in this step
 TSKEY               rmb       1                   tsnd: the key read
 GFXON               rmb       1                   non-zero: GfxInit ran (GfxExit undoes it)
 
+* the line sends (gfx.a BmSend) and the well (WellCom)
+BSBM                rmb       1                   BmSend: the bitmap
+BSUS                rmb       1                   BmSend: microseconds a record, for Spend
+WLST                rmb       1                   non-zero: the well is in the back layer (WLOLD as drawn)
+WLSTB               rmb       1                   frames its geometry has held, with the lines
+WLON                rmb       1                   WLOLD's records
+WLN                 rmb       1                   this frame's (AV.WNC)
+WLSAM               rmb       1                   non-zero: this frame's geometry is WLOLD's
+WLK                 rmb       1                   scratch: records picked
+WLI                 rmb       1                   scratch: records left
+WLT                 rmb       1                   scratch
+WLE0                rmb       1                   WlRows: the first row erased
+WLE1                rmb       1                   and the last
+WLNEW               rmb       2                   window A + $1E00: this frame's well (avg.a)
+WLDST               rmb       2                   scratch: where the next picked record goes
+TXALL               rmb       1                   non-zero: TxCommit draws every entry again
+WLOLD               rmb       56*8                the well as last seen (avg.a WMAX records)
+
 * the frame loop
 WORK                rmb       2                   this pass's budget left, estimated microseconds (Spend)
 DRAWNG              rmb       1                   non-zero: a frame's drawing is under way

@@ -39,6 +39,7 @@ BUDLOG              equ       0                   what a logic pass leaves for t
 HIRES               equ       1                   the line bitmaps 640x240 (gfx.a; branch hires640)
                     endc
 AVCOLL              equ       1                   small shapes collapsed (avg.a AvShp; status.md "Small shapes collapsed")
+AVWELL              equ       1                   the well drawn once into the back layer (gfx.a WellCom)
                     ifndef    RECUS
                     ifne      HIRES
 RECUS               equ       150                 a record, interpreted, made 640 (~9 us) and drawn (170 before: status.md "RECUS")
@@ -156,7 +157,14 @@ Draw                ldd       #0                  room for the first batch?
                     ldx       #MINBUS
                     bsr       Spend               (a later tick: the clear GamLog armed has run)
                     lbsr      NxtBat              its size, from the budget
+                    ifdef     AVWELL
+                    lda       #1                  the well's records captured (avg.a)
+                    sta       AVGPG+AV.WENA,u
+                    endc
                     lbsr      AvgRun              records to AvgFlush (gfx.a), which Spends
+                    ifdef     AVWELL
+                    lbsr      WellCom             the well: the back layer, or with the lines (gfx.a)
+                    endc
                     ldd       #0                  room for the flip and the CLUT?
                     ldx       #FLIPUS
                     bsr       Spend

@@ -1354,6 +1354,52 @@ ticks); the frame rates follow what was played. The same sound through `F$MapBlk
 between them and the text, cost the hardware far more than the model charges.** The MMU path
 stays. **The layer swap (`6371403`) is now on both disk images**, for its own run.
 
+## Hardware: the layer swap works (user, 2026-09-23)
+
+`6371403` on the K2: **2,564 game frames, 10,521 passes in 176 s** (14.6 and 59.8 a second; ~39 of
+10,560 ticks lost, 0.4%). The text on the back layer looks right.
+
+## The well cache (2026-09-23, host and MAME) — untested on hardware
+
+**The well is drawn once into the back layer (bitmap 2, with the text) and left there while its
+geometry holds.** Atari double-buffers it: `DSPWEL` rebuilds it only when it changes (`ROTDIS`) and
+patches its colour `STAT`s every frame; the top-level list always calls the switch `SWWELL`, word
+**`$205`**, which jumps into the active buffer.
+
+- **`avg.a` (`AVWELL`)**: while `AV.WENA` is set, the records made inside the JSRL to `$205` (to its
+  RTSL; repeated calls add to it) go to window A + `$1E00`, 56 at most (the 56th ends it: an
+  overflow, the rest go to the lines); `AV.WNC`, `AV.WOVF`. Captured records take room in the batch
+  they are interpreted in (`AV.WCB`), and `AvgFlush` charges them at **`WCBUS` 110 µs** (swept in
+  `osrun.py`: 50-90 lost 95-141 ticks a minute, 110-130 lost 17-19, the baseline). **Specified by
+  `PortAVG(well=True)`**; `avgtest.py --well`: **6,282 frames byte-exact** (both multiplies), **fuzz
+  20,000, 0 failed, 1,764 overflows** (its lists call a well at `$205`, sometimes over 56).
+- **`gfx.a` `WellCom`** (after the interpreter, before the flip), against `WLOLD`, the well as in
+  the back layer: **same geometry, in the back layer**: the records whose colour is not the back
+  layer's (the player's lane, the pulsars' flashes) go with this frame's lines, on top, and the
+  line clear takes them away next frame (**the user's idea**: nothing is redrawn in the back layer
+  during play); **geometry changed** (the zoom, no well, an overflow): the back-layer well drawn
+  in colour 0 (erased), the text redrawn whole (`TXALL`), the well with the lines; **with the
+  lines**: after 2 frames (`WSTAB`) of the same geometry it goes into the back layer. Sends ask the
+  pass for room first (`WlSend`: `WELUS` 50 µs a record and the call). `AvgFlush`'s loop is now
+  `BmSend` (any bitmap, a charge a record).
+- **`text.a`**: between its erase and its draw, `WlRows` draws again the well records on the rows
+  the erase touched (text erased over the well cut it); `TXALL` marks every row.
+- **`osrun.py`**: a model bug found on the way: its `SS.BmLine` drew into a block without first
+  taking back what the program had written through a window onto it, so it undid text erases
+  (fixed: `sync_out` first; on the F256 it is one memory). **New check, every frame**: the text
+  bitmap holds exactly the text and, when cached, `WLOLD`'s lines (any of their colours where a
+  glyph and the well, or two well records, meet), nothing else; the well's records not in the back
+  layer's colour, or all of them when not cached, are among the line layer's records.
+
+**Results** (`osrun.py` 120 s): every check right; **15.0 game frames a second**, 20 ticks lost in
+7,200; line records a frame 147 -> ~110; the well in the back layer ~75% of game frames. **The
+frame rate does not move in the model**: a game frame is a logic pass and then drawing passes,
+whole ticks each; the drawing still needs two passes (its estimate ~15 ms against the pass's 12.3),
+so frames stay at ~3 ticks. The gain arrives when a frame's drawing fits one pass; the hardware draws
+faster than the model guesses, so the K2 may see it where the model does not. `sndtest.py --game`
+90 s: 5,377 passes, 0 wrong. The Wildbits MAME: the game and `tempest s`. **Module 39,663 bytes of
+40,192 (529 left).** On both disk images.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
