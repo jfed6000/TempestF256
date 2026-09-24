@@ -362,11 +362,15 @@ em1                 lda       #1                  stdout
                     tst       EXITST,u
                     bne       emx
                     tst       T0BUF,u             the loop never started
-                    beq       emx
+                    beq       em2
                     bsr       Stats
                     lda       #1
                     os9       I$Write
                     lbsr      Stats2
+                    lda       #1
+                    os9       I$Write
+em2                 leax      Closer,pcr          the closer: Prospero, The Tempest 4.1
+                    ldy       #ClosLen
                     lda       #1
                     os9       I$Write
 emx                 rts
@@ -503,4 +507,7 @@ StTx4               fcc       / line calls,/
 StTx5               fcc       / short,/
                     fcb       0
 StTx6               fcc       / dropped/
-                    fcb       $0D,0
+                    fcb       $0D,$0A,0
+Closer              fcc       /Our revels now are ended./
+                    fcb       $0D
+ClosLen             equ       *-Closer

@@ -1685,6 +1685,13 @@ it (Atari's `QTMPAUS` has only ~80 frames left at the merge), so the port now **
 `osrun.py` logo state: **475 ticks -> 655 (10.9 s)**. Module 39,888 bytes; on both disk images; the
 Wildbits MAME: the game and its sign-off.
 
+## The closing line (2026-09-24, MAME) — untested on hardware
+
+User: on quitting, "some sort of ending line or closing quip". After the sign-off's numbers (and on
+any clean quit, even before the loop ran), `ExitMsg` (`platform.a`) prints Prospero's **"Our revels
+now are ended."** (*The Tempest*, 4.1); not after an error. Module 39,928 bytes; on both disk
+images; the Wildbits MAME: the sign-off, the line, then the shell's prompt.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
