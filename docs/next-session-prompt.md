@@ -29,7 +29,7 @@ the collapse and BmWait build works" on has every step, each marked confirmed or
     budgets removed), the title logo: every other trail copy skipped (LOGSKP 2), the merge 4 a
     frame and the hold set to 90 frames (LOGOQK, LOGMS, LOGHD). All confirmed on the K2.
   - nitros9 wb/multiterm ec0cc198 (SS.BmLine X to 639 on HIRES4) and c45760ab (LD.Depth 8192,
-    the new core's line FIFO): committed, NOT PUSHED. Installed on both disk images.
+    the new core's line FIFO): pushed to jfed6000/nitros9 2026-09-24. Installed on both disk images.
   - main dacdbbb: the 320 build from 2026-09-23 (15.4 game frames a second).
 
 NEXT SESSION: my call. Open items: docs/status.md "Open items".
