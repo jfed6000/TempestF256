@@ -1633,6 +1633,12 @@ from them.**
 (54.2 passes a second: long drawings are one pass now, their ticks caught up); **5,263 line calls
 (1.24 a game frame), 0 short, 5 dropped.** As `tempnb` (20.3 in 276 s), within play's spread.
 
+**The title zoom** (`osrun.py`, 200 s of attract): **550 ticks (9.2 s) a zoom, 103 of its 110
+frames drawn** (a logo drawing is now one pass of ~4-5 ticks and seldom reaches `SKIPT`), against
+707 (11.8 s, 55 drawn) with the split and drops, and 1,081 (18.0 s) at first: **~2x the original**;
+all of attract 17.8 game frames a second (13.6). The arcade's is ~4 s; a lower `SKIPT` would go
+faster, choppier, and would drop in play's heaviest moments too.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
