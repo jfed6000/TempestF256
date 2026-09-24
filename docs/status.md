@@ -1321,8 +1321,8 @@ Considered (user's question): shrinking the module to leave a second free block,
 the text bitmap could both stay mapped. The module would have to fit 4 blocks less 768, 32,000
 bytes, against 38,792: 6,800 bytes out, of which the vector ROM (4,096) would have to move into
 window A (the plan's fallback), which is full, so the record batch and the text list move into the
-data area, also nearly full; and ~2,700 more from tables and code. Not started: first see whether
-the MMU version cures the slowdown at all.
+data area, also nearly full; and ~2,700 more from tables and code. **Decided (user, 2026-09-23): not
+done.** The module stays in 5 blocks; the SIDs stay behind the MMU exception.
 
 ## Open items
 
