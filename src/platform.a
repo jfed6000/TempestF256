@@ -301,6 +301,9 @@ em1                 lda       #1                  stdout
                     bsr       Stats
                     lda       #1
                     os9       I$Write
+                    lbsr      Stats2
+                    lda       #1
+                    os9       I$Write
 emx                 rts
 
 ********************************************************************
@@ -360,6 +363,24 @@ ss1                 lda       #60
                     tfr       d,y
                     rts
 
+* Stats2 - "LLLLL line calls, KKKKK short": the SS.BmLine calls, and those
+*   the line FIFO's room cut short (gfx.a BmSend).  X = the line, Y its length.
+Stats2              leay      STLINE,u
+                    ldd       LNCALL,u
+                    bsr       Dec5
+                    leax      StTx4,pcr
+                    bsr       StCpy
+                    ldd       LNSHRT,u
+                    bsr       Dec5
+                    leax      StTx5,pcr
+                    bsr       StCpy
+                    tfr       y,d
+                    leax      STLINE,u
+                    pshs      x
+                    subd      ,s++
+                    tfr       d,y
+                    rts
+
 * StCpy - the text at X (ended by 0) to Y+
 StCpy               lda       ,x+
                     beq       scx
@@ -406,4 +427,8 @@ StTx1               fcc       / game frames,/
 StTx2               fcc       / passes in/
                     fcb       0
 StTx3               fcc       / s/
+                    fcb       $0D,$0A,0           (I$Write: a CR alone returns on the same row)
+StTx4               fcc       / line calls,/
+                    fcb       0
+StTx5               fcc       / short/
                     fcb       $0D,0

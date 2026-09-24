@@ -330,6 +330,9 @@ hx2                 stb       6,x
 BmSend              lda       #20
                     sta       FLSHN,u
 af1                 pshs      b,x                 ,s = records left, 1,s = the next
+                    ldd       LNCALL,u            (the sign-off counts the calls)
+                    addd      #1
+                    std       LNCALL,u
                     ldb       BSBM,u
                     clra
                     tfr       d,y                 Y = the bitmap
@@ -349,7 +352,14 @@ af1                 pshs      b,x                 ,s = records left, 1,s = the n
                     ldx       #MINBUS
                     lbsr      Spend               (which may give the tick back here)
                     puls      b
-                    tstb
+                    cmpb      ,s                  short (the FIFO's room ran out): counted
+                    bhs       af2
+                    pshs      b
+                    ldd       LNSHRT,u
+                    addd      #1
+                    std       LNSHRT,u
+                    puls      b
+af2                 tstb
                     beq       af3                 none: the FIFO is full
                     pshs      b
                     ldb       1,s

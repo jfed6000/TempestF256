@@ -1400,6 +1400,20 @@ faster than the model guesses, so the K2 may see it where the model does not. `s
 90 s: 5,377 passes, 0 wrong. The Wildbits MAME: the game and `tempest s`. **Module 39,663 bytes of
 40,192 (529 left).** On both disk images.
 
+## The line FIFO doubled (2026-09-24) — the driver change prepared, not installed
+
+The FPGA developer doubled the line engine's pixel FIFO to 8,192 (user: confirmed). `SS.BmLine`
+stops a batch when the FIFO's count passes `LD.Room4` = `LD.Depth` - 640 and returns short; each
+short return costs us a whole extra call (~450 µs). The driver had `LD.Depth` 4,096 built in, so it
+used half the new FIFO. **NitrOS-9 `wb/multiterm` (committed locally, not pushed): `LD.Depth` 8,192**
+(`defs/wildbits.d`; the built `grfdrv256` differs in the two room constants and the CRC; both
+platforms' builds of the old source were first checked identical to the drivers on the images).
+**Not on the disk images yet**, so that one run measures the old driver and the next the new.
+
+**The measure: the sign-off's second line, "LLLLL line calls, KKKKK short"** (`BmSend` counts each
+`SS.BmLine` call and each that came back short; `osrun.py`'s driver never runs short, so it
+reads 0 there). On both disk images with the well cache (module 39,764 bytes, 428 left).
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

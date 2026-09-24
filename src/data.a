@@ -125,6 +125,8 @@ TIMBUF              rmb       6                   F$Time's packet (the RANDOM se
 T0BUF               rmb       6                   F$Time at the first pass (the sign-off's numbers)
 PASSES              rmb       2                   passes of the frame loop (one a tick, if none ran long)
 STLINE              rmb       48                  the sign-off's numbers, as text
+LNCALL              rmb       2                   SS.BmLine calls (gfx.a BmSend), for the sign-off
+LNSHRT              rmb       2                   of them, returned short: the line FIFO's room ran out
 
 StkBase             equ       $1C00               the stack: the top 1K (as Joust), with OS-9's parameters
                     ifgt      .-StkBase
