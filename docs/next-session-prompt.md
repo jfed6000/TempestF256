@@ -5,7 +5,7 @@ Paste the block below to start the next session, from ~/projects/wild/tempest.
 ```
 We're porting Atari's arcade TEMPEST (Rev 3, the source's "2A(alt)") to NitrOS-9 Level 2 on the
 Wildbits F256 (6809, rc16 FPGA core, K2 and Jr2). Joust, the first game on this platform, is finished in
-~/projects/wild/joust. This folder is a local git repo (main and hires640, no remote until I say so).
+~/projects/wild/joust. This folder is a git repo (main and hires640), remote origin https://github.com/jfed6000/TempestF256 (public).
 
 READ FIRST:
   - docs/status.md: state, decisions, hardware findings, stage 0's numbers. Start here.
