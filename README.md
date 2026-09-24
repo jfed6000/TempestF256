@@ -11,4 +11,4 @@ is kept, unchanged, in `tempest_orig/` as the port's reference.
 - `tools/`: host-side models and tests
 - `docs/`: the port's plan, survey and status
 
-The 640x240 build is on branch `hires640`.
+The 640x240 build is on `main` (merged from `hires640`).

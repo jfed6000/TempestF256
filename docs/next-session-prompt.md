@@ -18,7 +18,7 @@ READ FIRST:
 
 WHERE THINGS STAND (2026-09-24, end of the performance session; docs/status.md from "Hardware:
 the collapse and BmWait build works" on has every step, each marked confirmed or untested):
-  - BRANCH hires640 (checked out, c0a1f59, 39 commits past main, not merged: my call). 640x240
+  - main (5aeffe8, hires640 merged in 2026-09-24; hires640 kept, at the same commit). 640x240
     HIRES4 planes. K2: 19.8 game frames a second (4,230 in 214 s, 5 dropped), up from 13.0.
     In order: small shapes collapsed to dots (AVCOLL), BmWait gone, sound on the two SIDs
     (POKEY image; the SIDs reached by a direct MMU slot write, interrupts masked: SidOn/SidOff,
@@ -30,7 +30,7 @@ the collapse and BmWait build works" on has every step, each marked confirmed or
     frame and the hold set to 90 frames (LOGOQK, LOGMS, LOGHD). All confirmed on the K2.
   - nitros9 wb/multiterm ec0cc198 (SS.BmLine X to 639 on HIRES4) and c45760ab (LD.Depth 8192,
     the new core's line FIFO): pushed to jfed6000/nitros9 2026-09-24. Installed on both disk images.
-  - main dacdbbb: the 320 build from 2026-09-23 (15.4 game frames a second).
+  - The 320 build: main before the merge, dacdbbb (15.4 game frames a second).
 
 NEXT SESSION: my call. Open items: docs/status.md "Open items".
 
