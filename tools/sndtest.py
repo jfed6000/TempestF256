@@ -18,12 +18,16 @@ channels that sounded.  It proves the mapping and the bookkeeping, not how it so
 With --game it runs the game instead ("tempest", played by osrun.py's script) and makes the same
 checks every pass: the game's own sounds, through the main loop's SndOut.
 
+tsnd is only in a module built with TSND: this script assembles one into src/build/ (the
+makefile's command, -DTSND), leaving src/tempest alone; --game runs src/tempest.
+
   python3 tools/sndtest.py [--seconds 45] [--game]
 """
 
 import argparse
 import collections
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -108,6 +112,29 @@ class SndHost(Host):
                 "sr": r[6]}
 
 
+NITROS9DIR = os.environ.get("NITROS9DIR", "/home/magnus/projects/wild/joust/nitros9_complete/nitros9")
+
+
+def build_tsnd():
+    """src/build/tempest.tsnd: the module with TSND, as the makefile assembles it"""
+    out = os.path.join(SRC, "build")
+    os.makedirs(out, exist_ok=True)
+    mod, mp = os.path.join(out, "tempest.tsnd"), os.path.join(out, "tempest.tsnd.map")
+    r = subprocess.run(["lwasm.orig", "--6809", "--format=os9",
+                        "--pragma=nosymbolcase,condundefzero,dollarnotlocal",
+                        "--includedir=%s/defs" % NITROS9DIR, "-I", "%s/level2/wildbits" % NITROS9DIR,
+                        "-I", ".", "-Dwildbits=1", "-DTSND", "--map=" + mp, "-o", mod, "tempest.asm"],
+                       cwd=SRC, capture_output=True, text=True)
+    if r.returncode:
+        sys.exit((r.stdout + r.stderr)[-3000:] + "\nthe TSND build failed")
+    sym = {}
+    for line in open(mp):
+        p = line.split()
+        if len(p) >= 5 and p[0] == "Symbol:":
+            sym[p[1]] = int(p[4], 16)
+    return open(mod, "rb").read(), sym
+
+
 def want(audf, audc):
     """the voice sound.a should give a POKEY channel, or None if it is silent"""
     vol = audc & 15
@@ -124,8 +151,11 @@ def main():
     ap.add_argument("--seconds", type=float, default=45)
     ap.add_argument("--game", action="store_true", help="the game, not tsnd")
     a = ap.parse_args()
-    module = open(os.path.join(SRC, "tempest"), "rb").read()
-    sym = osrun.symbols()
+    if a.game:
+        module = open(os.path.join(SRC, "tempest"), "rb").read()
+        sym = osrun.symbols()
+    else:
+        module, sym = build_tsnd()
     h = SndHost(module, sym, osrun.script, keys={} if a.game else {30: "r"})
     execoff = module[9] << 8 | module[10]
     h.u, h.dp, h.s = DATA, DATA >> 8, 0x2000

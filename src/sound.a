@@ -101,10 +101,7 @@ SidVof              fdb       $000,$007,$00E,$100,$107,$10E
 * SndInit - both SIDs silent and set up; every voice free.
 *   Exit: carry = error in B.
 ********************************************************************
-SndInit             lda       TSMODE,u            "tempest n": the game without sound (SndOut idle)
-                    cmpa      #'n
-                    beq       sin
-                    lbsr      SidOn
+SndInit             lbsr      SidOn
                     ldb       #$19                every register of both SIDs to 0
 si1                 decb
                     clr       b,x
@@ -135,7 +132,7 @@ si4                 clr       ,y+
                     decb
                     bne       si4
                     inc       SNDUP,u
-sin                 clrb
+                    clrb
                     rts
 
 ********************************************************************
@@ -301,8 +298,9 @@ soff                ldb       SNDCH,u
                     sta       4,y
                     bra       sonx
 
+                    ifdef     TSND                (make EXTRA="-DTSND"; tools/sndtest.py builds it)
 ********************************************************************
-* Tsnd - the sound test (plan stage 4): "tempest s".  The text screen
+* TsMain - tsnd, the sound test (plan stage 4): "tempest s".  The text screen
 *   stays; each pass runs the virtual IRQs' MODSND and SndOut, and
 *   the keys start sounds (FSNDON, as the game's calls do):
 *     0-9 a b c  sound 0-12      r  the sequence      x  stop      q  quit
@@ -310,7 +308,7 @@ soff                ldb       SNDCH,u
 *   tube with fire, and pulsation with an explosion, 4 s each: the
 *   same steps as tools/sndref.lua records from the arcade in MAME.
 ********************************************************************
-Tsnd                lbsr      INISOU              ALSOUN's own start
+TsMain              lbsr      INISOU              ALSOUN's own start
                     lbsr       TsStop
                     lbsr      SndInit
                     lbcs      Quit
@@ -429,3 +427,4 @@ TsStps               fcb       150,0,$FF,150,1,$FF,150,2,$FF,150,3,$FF,150,4,$FF
 TsHelp              fcc       "tsnd: 0-9 a-c sounds, r sequence, x stop, q quit"
                     fcb       C$CR,C$LF
 TsHlpL              equ       *-TsHelp
+                    endc

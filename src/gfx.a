@@ -260,6 +260,44 @@ bcok                clrb
 bcerr               leas      2,s
                     rts
 
+* WlCv1 - the record at X into Y: 640 and a nibble, or with A non-zero
+*   the nibble 0 (an erase).  X and Y advance 8.  A, B clobbered.
+WlCv1               pshs      a
+                    ldd       ,x
+                    ifne      HIRES
+                    lslb
+                    rola
+                    endc
+                    std       ,y
+                    ldd       2,x
+                    ifne      HIRES
+                    lslb
+                    rola
+                    endc
+                    std       2,y
+                    ldd       4,x
+                    std       4,y
+                    tst       ,s
+                    bne       wv2
+                    ldb       6,x                 colour << 4 | intensity
+                    ifne      HIRES
+                    lsrb
+                    lsrb
+                    lsrb
+                    lsrb
+                    incb
+                    cmpb      #16
+                    blo       wv3
+                    ldb       #15
+                    endc
+                    bra       wv3
+wv2                 clrb
+wv3                 stb       6,y
+                    clr       7,y
+                    leax      8,x
+                    leay      8,y
+                    puls      a,pc
+
 ********************************************************************
 * AvgFlush - the interpreter's batch (avg.a): X = the records, B = the
 *   count (1-255; with AVWELL 0-255, and AVGPG+AV.WCB records the well's
@@ -286,27 +324,11 @@ af0                 tstb
                     lbeq      NxtBat              (only the well's)
                     endc
                     ifne      HIRES
-                    pshs      b,x                 the batch into 640 and nibbles, once
+                    pshs      b,x                 the batch into 640 and nibbles, in place, once
                     pshs      b
-hx1                 ldd       ,x
-                    lslb
-                    rola
-                    std       ,x
-                    ldd       2,x
-                    lslb
-                    rola
-                    std       2,x
-                    ldb       6,x                 colour << 4 | intensity
-                    lsrb
-                    lsrb
-                    lsrb
-                    lsrb
-                    incb
-                    cmpb      #16
-                    blo       hx2
-                    ldb       #15
-hx2                 stb       6,x
-                    leax      8,x
+                    tfr       x,y
+hx1                 clra
+                    lbsr      WlCv1
                     dec       ,s
                     bne       hx1
                     leas      1,s
@@ -410,44 +432,6 @@ WCBUS               equ       110                 a well record interpreted and 
                     endc
 BMTXT               equ       2                   the text bitmap, on the back layer
 
-* WlCv1 - the record at X into Y: 640 and a nibble, or with A non-zero
-*   the nibble 0 (an erase).  X and Y advance 8.  A, B clobbered.
-WlCv1               pshs      a
-                    ldd       ,x
-                    ifne      HIRES
-                    lslb
-                    rola
-                    endc
-                    std       ,y
-                    ldd       2,x
-                    ifne      HIRES
-                    lslb
-                    rola
-                    endc
-                    std       2,y
-                    ldd       4,x
-                    std       4,y
-                    tst       ,s
-                    bne       wv2
-                    ldb       6,x                 colour << 4 | intensity
-                    ifne      HIRES
-                    lsrb
-                    lsrb
-                    lsrb
-                    lsrb
-                    incb
-                    cmpb      #16
-                    blo       wv3
-                    ldb       #15
-                    endc
-                    bra       wv3
-wv2                 clrb
-wv3                 stb       6,y
-                    clr       7,y
-                    leax      8,x
-                    leay      8,y
-                    puls      a,pc
-
 * WlSend - X = records (640, nibbles), B = the count: room in the pass
 *   for them and the call first (Spend may give the tick back), then
 *   BmSend at WELUS a record.
@@ -469,7 +453,7 @@ WlAll               pshs      b                   the count, and a copy to count
                     pshs      b
                     ldy       VWIN,u
                     leay      $1000,y
-wa1                 bsr       WlCv1
+wa1                 lbsr      WlCv1
                     dec       ,s
                     bne       wa1
                     leas      1,s

@@ -1502,6 +1502,22 @@ cache ~1,450 (`avg.a` capture, skip and cache; `gfx.a` `WellCom`, `WlRows`, `Avg
 (~30), `AvShp`'s repeated range check (~8), the shape map at half the resolution (~64), the
 sign-off's second line (~100).
 
+## Cleanup 1-4 (2026-09-24, host and MAME)
+
+User: "do 1 through 4". **Module 40,170 -> 39,746 bytes (446 free).**
+1. **`tsnd` only in a `TSND` build** (`make EXTRA="-DTSND"`, 40,134 bytes: it still fits):
+   `TsMain` and its tables, and the start-up's parameter read. `tools/sndtest.py` assembles its own
+   `TSND` module into `src/build/` (the makefile's command) and leaves `src/tempest` alone;
+   `--game` runs `src/tempest`. (The routine was `Tsnd`: lwasm's case folding made it `TSND`.)
+2. **`tempest n` gone** (sound is settled).
+3. **`AvgFlush` converts its batch with `WlCv1`**, in place (now outside `AVWELL`).
+4. **`AvShp` no longer repeats the range check `_JS2` made.**
+
+Checked: `avgtest.py --collapse --well` 6,282 frames exact, fuzz 10,000 (both multiplies, random
+batches) 0 failed; `osrun.py` 60 s 16.3 game frames a second, every check right; `sndtest.py` tsnd
+2,699 and game 3,542 passes, 0 wrong; the Wildbits MAME: the game and its sign-off. On both disk
+images (with the 8,192 driver).
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

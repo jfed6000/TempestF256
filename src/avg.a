@@ -1323,9 +1323,7 @@ AvShp	ldd	<AV.Q			a Q too big for any: no search
 	cmpd	#AvSQMx
 	bhs	_SHno
 	ldd	<AV.T
-	subd	#$0800
-	cmpd	#$0800			(below $800 wraps high)
-	bhs	_SHno
+	subd	#$0800			(_JS2 kept it to AvSLo-AvSHi, inside $800-$FFF)
 	lsra				D >> 4: the 16-word bucket, 0-127
 	rorb
 	lsra

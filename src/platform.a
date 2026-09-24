@@ -7,16 +7,21 @@
 ********************************************************************
 * start - U = the data area, DP = its page (OS-9)
 ********************************************************************
-start               lda       ,x                  the parameters' first character (above StkBase)
+start
+                    ifdef     TSND
+                    lda       ,x                  the parameters' first character (above StkBase)
                     pshs      a
+                    endc
                     tfr       u,x                 clear the data area below the stack
                     ldy       #StkBase
 st1                 clr       ,x+
                     leay      -1,y
                     bne       st1
+                    ifdef     TSND
                     puls      a
                     ora       #$20                (lower case)
                     sta       TSMODE,u
+                    endc
                     tfr       u,d                 the pseudo-registers' pointers: the data
                     sta       <RXP                area's page, the low byte the 6502 register
                     sta       <RYP
@@ -41,9 +46,11 @@ st1                 clr       ,x+
                     lbsr      AWinInit            window A: vector RAM, records, texts
                     lbcs      Quit
                     lbsr      RELINI              the address tables (reloc.a), after VWIN
+                    ifdef     TSND
                     lda       TSMODE,u            "tempest s": the sound test instead (sound.a)
                     cmpa      #'s
-                    lbeq      Tsnd
+                    lbeq      TsMain
+                    endc
                     lbsr      GfxInit             bitmaps, CLUT, layers, display
                     lbcs      Quit
                     lbsr      InInit              the mouse, if SS.MsDelta answers
