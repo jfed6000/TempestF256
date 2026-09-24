@@ -1657,6 +1657,11 @@ fixed costs (the logic pass, the text, the flip) keep the gain below the records
 `LOGSKP` 3. The game (`osrun.py` 40 s): 20.1 game frames a second, every check right. Module
 39,852 bytes; on both disk images; the Wildbits MAME: the game and its sign-off.
 
+**Then `LOGSKP` 2** (user: "Let's skip every other one"): 10 of the 19 copies drawn, **306 records
+a logo frame (612 whole)**; the trail sparser, some colour bands gone, still a trail.
+`avgtest.py --logskip 2`: attract 2,801 frames exact, fuzz 1,000 clean. On both disk images; the
+Wildbits MAME: the game and its sign-off.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
