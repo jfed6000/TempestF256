@@ -31,6 +31,9 @@ HIRES               equ       1                   the line bitmaps 640x240 (gfx.
                     endc
 AVCOLL              equ       1                   small shapes collapsed (avg.a AvShp; status.md "Small shapes collapsed")
 AVWELL              equ       1                   the well drawn once into the back layer (gfx.a WellCom)
+                    ifndef    LOGSKP
+LOGSKP              equ       4                   every 4th copy of the attract logo not drawn (avg.a)
+                    endc
 
 * The clock (platform.a SolOn): with SOLdrv, a signal at line 0 of every
 *   frame counts TICKS, and a pass runs the virtual IRQs of every tick

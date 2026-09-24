@@ -405,10 +405,13 @@ class PortAVG:
     WELLT = 0x205              # SWWELL: the top-level list's call into the active well buffer
     WMAX = 56                  # records a well capture holds (avg.a AvWBeg; the well is 48)
 
-    def __init__(self, rom, glyphs=True, collapse=False, well=False):
+    LOGOT = 0xFA7              # the attract logo, whole (avg.a LOGSKP)
+
+    def __init__(self, rom, glyphs=True, collapse=False, well=False, logskip=0):
         self.rom = rom
         self.well = well           # capture the well (avg.a AVWELL): its records to self.wrecs
         self.wcache = None         # the well as last run whole (below), kept from frame to frame
+        self.logskip = logskip     # every logskip-th call to the logo in a frame is skipped (0: none)
         self.gmap = {}             # target word -> glyph index (first VGMSGA entry using it)
         self.gtab = {}             # (index, big) -> (dcol, drow, scale_after, intensity or 0)
         if glyphs:
@@ -428,6 +431,7 @@ class PortAVG:
         recs, texts = [], []
         wrecs, wr7, wcap, wsp, wovf = [], [], False, 0, False
         cap, r7 = None, 0          # this capture's start; a record's byte 7 (its colour word)
+        lgk = self.logskip         # logo calls until the next skipped
         last = None                # the last record sent, to either list (avg.a AV.LEX/LEY/LCL)
 
         def emit(rec):
@@ -518,6 +522,12 @@ class PortAVG:
                         bs, scale = after
                         q = q_for(scale, bs)
                     continue
+                if self.logskip and t == self.LOGOT:
+                    lgk -= 1
+                    if not lgk:                 # this copy of the logo is not drawn
+                        lgk = self.logskip
+                        st["logoskip"] = st.get("logoskip", 0) + 1
+                        continue
                 e = self.shapes.get(t)
                 if e is not None and bs <= e["bslim"] and q < e["qmax"]:
                     # a small shape (shape_table): not run.  A block of its box, a horizontal

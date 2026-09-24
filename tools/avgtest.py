@@ -65,7 +65,7 @@ AvgLast\tclrb
 """ % FLUSH_PORT
 
 
-def build(sw=False, batch=None, collapse=False, well=False):
+def build(sw=False, batch=None, collapse=False, well=False, logskip=0):
     os.makedirs(BUILD, exist_ok=True)
     wrap = os.path.join(BUILD, "avgtest.a")
     open(wrap, "w").write(WRAPPER)
@@ -73,7 +73,7 @@ def build(sw=False, batch=None, collapse=False, well=False):
     r = subprocess.run(["lwasm.orig", "--6809", "--format=raw", "--pragma=nosymbolcase", "-I", SRC,
                         "-o", binp, "--list=" + lst, "--symbols", wrap] + (["-DAVGSWM"] if sw else []) +
                        (["-DRBATCH=%d" % batch] if batch else []) + (["-DAVCOLL"] if collapse else []) +
-                       (["-DAVWELL"] if well else []),
+                       (["-DAVWELL"] if well else []) + (["-DLOGSKP=%d" % logskip] if logskip else []),
                        capture_output=True, text=True)
     if r.returncode:
         sys.exit((r.stdout + r.stderr)[:4000] + "\nsrc/avg.a does not assemble")
@@ -276,9 +276,9 @@ def fuzz(a, code, labels):
     rng = random.Random(a.seed)
     rigs = [Rig(code, labels, lay) for lay in LAYOUTS]
     rom = open(os.path.join(SRC, "vrom.bin"), "rb").read()
-    ports = [av.PortAVG(rom, collapse=a.collapse, well=a.well) for _ in rigs]
+    ports = [av.PortAVG(rom, collapse=a.collapse, well=a.well, logskip=a.logskip) for _ in rigs]
     port = ports[0]
-    shapes = sorted(port.shapes) if a.collapse else ()
+    shapes = sorted(port.shapes) + ([av.PortAVG.LOGOT] if a.logskip else []) if a.collapse else ()
     ovfs = skips = 0
     prev = [None, None]
     fails = 0
@@ -338,13 +338,14 @@ def main():
     ap.add_argument("--collapse", action="store_true", help="small shapes collapsed (AVCOLL; PortAVG's"
                     " collapse=True)")
     ap.add_argument("--well", action="store_true", help="the well captured (AVWELL; PortAVG's well=True)")
+    ap.add_argument("--logskip", type=int, default=0, help="every n-th logo call skipped (LOGSKP)")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args()
 
     global BATCH_RANDOM, WELL
     BATCH_RANDOM = a.batch == 0
     WELL = a.well
-    code, labels = build(a.sw, a.batch or None, a.collapse, a.well)
+    code, labels = build(a.sw, a.batch or None, a.collapse, a.well, a.logskip)
     print("avg.a: %d bytes of code, %d with the glyph tables (VROM excluded)" %
           (labels["AvGMap"] - labels["AvgRun"], labels["VROM"] - labels["AvgRun"]))
     if a.fuzz:
@@ -359,7 +360,8 @@ def main():
         k = 0
         for item in av.read_capture(cap):
             if item[0] == "rom":
-                ports = [av.PortAVG(item[1], collapse=a.collapse, well=a.well) for _ in rigs]
+                ports = [av.PortAVG(item[1], collapse=a.collapse, well=a.well, logskip=a.logskip)
+                         for _ in rigs]
                 continue
             _, n, vram, cram = item
             if n < a.first:

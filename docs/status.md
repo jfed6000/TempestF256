@@ -1639,6 +1639,24 @@ frames drawn** (a logo drawing is now one pass of ~4-5 ticks and seldom reaches 
 all of attract 17.8 game frames a second (13.6). The arcade's is ~4 s; a lower `SKIPT` would go
 faster, choppier, and would drop in play's heaviest moments too.
 
+## The logo's trail thinned (2026-09-24, host and MAME) — untested on hardware
+
+User: "Logo looks faster, but it would be nice to make it even faster. What if we removed every
+third TEMPEST or every fourth one". The trail is the list at `$101`: per copy a `SCAL`, a colour,
+and **`JSRL $FA7`**, the whole logo in ROM, which **starts with a `CNTR`**; after the last copy the
+list does its own `CNTR` and `SCAL`. So a copy skipped leaves the rest untouched. **`avg.a`
+`LOGSKP`**: every `LOGSKP`-th call to `$FA7` in a frame is not run (a counter in the page, `AV.LGK`,
+reset by `AvgRun`); **`frame.a` sets 4** (15 of 19 copies drawn). `PortAVG(logskip=N)` specifies
+it; `avgtest.py --logskip 4`: attract 2,801 frames exact, fuzz 2,000 (lists call `$FA7` too)
+clean; the worst attract frame 48.7 -> 39.1 ms. Records a logo frame 646 -> 510 (every 3rd: 442).
+Pictures side by side: the trail still reads as one, a little sparser.
+
+`osrun.py` 200 s of attract, **per logo frame: 5.3 ticks (all copies), 4.4 (every 4th skipped,
+17% faster), 4.1 (every 3rd, 24%)**; a whole zoom ~9.8 s -> ~8.2 s (every 3rd ~7.4 s). The frame's
+fixed costs (the logic pass, the text, the flip) keep the gain below the records cut. Every 3rd is
+`LOGSKP` 3. The game (`osrun.py` 40 s): 20.1 game frames a second, every check right. Module
+39,852 bytes; on both disk images; the Wildbits MAME: the game and its sign-off.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

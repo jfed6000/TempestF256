@@ -129,6 +129,7 @@ AV.CCLO	equ	166			AV.CLON
 AV.CLSC	equ	167			2: AV.LSCL
 AV.CLEX	equ	169			2: the last record's end, column
 AV.CLEY	equ	171			and row
+AV.LGK	equ	172			LOGSKP: calls to the logo until the next one skipped
 
 * AvSTab's entries (avgtab.a, tools/avgview.py shape_table)
 SH.TGT	equ	0			2: the target (word address); $FFFF ends the table
@@ -158,6 +159,7 @@ SHLEN	equ	21
 * run whole and returned from is the cache.  PortAVG(well=True) specifies it, cache and all.
 WELLT	equ	$205
 WMAX	equ	56
+LOGOT	equ	$FA7			the attract logo, whole (CNTR first: each call stands alone)
 
 * AvgRun - interpret the display list in window A once.
 * In: U = the data area (VWIN set; page-aligned).  Out: AVGPG+AV.TCNT texts at window A + $1800,
@@ -232,6 +234,11 @@ AvgRun	pshs	u,dp
 	sta	<AV.WOVF
 	sta	<AV.WCB
 	sta	<AV.R7
+	endc
+	ifdef	LOGSKP
+	lda	#LOGSKP			every LOGSKP-th logo call of the frame is skipped
+	sta	<AV.LGK
+	clra
 	endc
 	ldd	#MAXJMP
 	std	<AV.JMP
@@ -1117,6 +1124,18 @@ _JS1	ldx	<AV.GMAP
 	bne	AvGlyph
 	endc
 _JS2
+	ifdef	LOGSKP
+	ldd	<AV.T			the logo (the attract trail, 19 copies a frame): every LOGSKP-th
+	cmpd	#LOGOT			copy is not drawn; each starts with a CNTR, so the rest stand
+	bne	_JS6
+	dec	<AV.LGK
+	bne	_JS6
+	lda	#LOGSKP
+	sta	<AV.LGK
+	leay	2,y
+	lbra	AvLoop
+_JS6
+	endc
 	ifdef	AVCOLL
 	ldd	<AV.T			a target AvSTab may hold: AvShp
 	cmpd	#AvSLo
