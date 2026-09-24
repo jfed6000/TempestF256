@@ -480,25 +480,20 @@ class Host(CPU6809):
         self.prev_texts = texts
 
     def picture(self, path):
-        shown = self.layers[1]
-        lines, text = self.bm_bytes(shown), self.bm_bytes(2)
-        hi = self.hires[shown]
+        # the layers front (0) to back (2): the first non-transparent dot wins; a tile map shows nothing
+        srcs = [(self.bm_bytes(src), self.hires[src]) for src in self.layers if src is not None and src < 3]
         rows = []
         for y in range(H):
             row = bytearray([0])
             for x in range(2 * W):                  # 640 wide: the 320 planes' dots doubled
-                i = text[y * W + x // 2]
-                if self.hires[2]:
-                    i = i >> 4 if x % 2 == 0 else i & 15
-                if i:
-                    b, g, r, _ = self.clut1[i] if self.hires[2] else self.clut[i]
-                elif hi:
-                    v = lines[y * W + x // 2]
-                    v = v >> 4 if x % 2 == 0 else v & 15
-                    b, g, r, _ = self.clut1[v] if v else (0, 0, 0, 0)
-                else:
-                    v = lines[y * W + x // 2]
-                    b, g, r, _ = self.clut[v] if v else (0, 0, 0, 0)
+                b = g = r = 0
+                for plane, hi in srcs:
+                    v = plane[y * W + x // 2]
+                    if hi:
+                        v = v >> 4 if x % 2 == 0 else v & 15
+                    if v:
+                        b, g, r, _ = self.clut1[v] if hi else self.clut[v]
+                        break
                 row += bytes((r, g, b))
             rows.append(bytes(row))
 

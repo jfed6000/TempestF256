@@ -4,9 +4,11 @@
 *
 *   Bitmaps 0 and 1 are the lines, double-buffered (docs/port-plan.md
 *   D9): SHOWN on layer 1, the other cleared and drawn each game frame,
-*   then shown.  Bitmap 2 is the text (D3), on layer 0 in front, drawn
-*   by text.a only where the text changes.  Layer 2 is tile map 0, and
-*   tile maps are off in the display mode, so it shows nothing.
+*   then shown.  Bitmap 2 is the text (D3), on layer 2 at the back
+*   (behind the lines, so a line crossing text covers it, and the back
+*   layer can hold what does not change: the well, next), drawn by
+*   text.a only where the text changes.  Layer 0, in front, is tile map
+*   0, and tile maps are off in the display mode, so it shows nothing.
 *
 *   One CLUT (0) for all three: entry colour * 16 + intensity (docs/
 *   port-tempest.md 4.3).  Entry 0 is transparent, which a clear bitmap
@@ -54,16 +56,16 @@ gi2                 lda       ,x+
                     bne       gi2
                     lbsr      ClutCommit
                     bcs       gix
-                    ldx       #0                  layer 0: the text
-                    ldy       #2
+                    ldx       #0                  layer 0, in front: tile map 0, off
+                    ldy       #4
                     bsr       Layer
                     bcs       gix
                     ldx       #1                  layer 1: the lines
                     ldy       #0
                     bsr       Layer
                     bcs       gix
-                    ldx       #2                  layer 2: tile map 0, off
-                    ldy       #4
+                    ldx       #2                  layer 2, at the back: the text
+                    ldy       #2
                     bsr       Layer
                     bcs       gix
                     ifne      HIRES

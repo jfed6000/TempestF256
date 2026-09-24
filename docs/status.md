@@ -1324,6 +1324,27 @@ window A (the plan's fallback), which is full, so the record batch and the text 
 data area, also nearly full; and ~2,700 more from tables and code. **Decided (user, 2026-09-23): not
 done.** The module stays in 5 blocks; the SIDs stay behind the MMU exception.
 
+## The well: measured, and the layer swap prepared (2026-09-23)
+
+**The well is the display list's sub-list at vector RAM word `$205`: exactly 48 records every play
+frame** (16 rim, 16 far, 16 spokes), about 30% of the median frame's 161. Between consecutive
+play samples (2,531 pairs): identical 25%, **colours only 63%** (the highlighted lane follows the
+player), geometry changed 12% (the zoom between levels). So its shape is fixed 88% of the time.
+
+**The plan (agreed, user 2026-09-23), one hardware run a step:** (1) the text bitmap to the back
+layer; (2) the well drawn once into it, its 48 records kept: identical, nothing sent; colours only,
+the changed segments redrawn; geometry changed, the back-layer well erased (its old lines in colour
+0) and the well drawn with the lines until it settles; (3) text erased over the well redraws the
+segments it cut. Estimated 10-15% more game frames in play: ~42-48 records a frame fewer through the
+driver and, more, through the budget's `RECUS` charge.
+
+**Step 1, prepared, NOT on the disk images** (they hold `107bf7d` for the `tempest` / `tempest n`
+comparison): `GfxInit` puts tile map 0 (off) on layer 0 in front, the lines on layer 1, **the text
+bitmap on layer 2 at the back**. A line crossing text now covers it. `osrun.py` composes its
+pictures front to back from the layers as set (it had the text in front hard-coded). `osrun.py`
+40 s: every check right, 15.1 game frames a second; the Wildbits MAME: title, coin, start, rating
+screen (text shown from the back layer), sign-off. Module 38,792 bytes (unchanged).
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
