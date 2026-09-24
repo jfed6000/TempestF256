@@ -1662,7 +1662,7 @@ a logo frame (612 whole)**; the trail sparser, some colour bands gone, still a t
 `avgtest.py --logskip 2`: attract 2,801 frames exact, fuzz 1,000 clean. On both disk images; the
 Wildbits MAME: the game and its sign-off.
 
-## The logo's quiet end shortened (2026-09-24, host and MAME) — untested on hardware
+## The logo's quiet end shortened (2026-09-24) — confirmed on the K2
 
 User: the final phase is slow "as the multiple tempests merge together"; "Can we do something about
 the quiet phase? The zoom looks good up to that point." Measured in the arcade capture: the zoom
@@ -1677,7 +1677,7 @@ frames at most. The zoom itself is untouched. `osrun.py` (130 s of attract, the 
 state `$14`): **635 ticks (10.6 s) -> 475 (7.9 s)**. `xlattest.py --src -n 40` byte-exact. Module
 39,884 bytes; on both disk images; the Wildbits MAME: the game and its sign-off.
 
-**The hold lengthened (2026-09-24, host and MAME) — untested on hardware.** User, on the K2: "That
+**The hold lengthened (2026-09-24) — confirmed on the K2** ("Pretty good! Looking good!"). User, on the K2: "That
 looks a ton better. Could probably hold for about 3 seconds longer at the end." A cap could not do
 it (Atari's `QTMPAUS` has only ~80 frames left at the merge), so the port now **sets** `QTMPAUS` to
 `LOGHD` once, on the frame the trail closes on the arrived front (`FARY` changes to `NEARY`, below
