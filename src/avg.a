@@ -101,6 +101,34 @@ AV.WENA	equ	129			in: non-zero = capture the well (the caller's, as AV.RMAX)
 AV.WCB	equ	130			the well's records interpreted since the last flush: they took
 *					the batch's room, and AvgFlush charges them (not in the batch)
 AV.WN0	equ	131			AV.WNC when this capture began
+AV.R7	equ	132			a record's byte 7: 0, or while capturing its colour word (below)
+AV.TB6	equ	133			2: the capture's well buffer, as a 6809 address
+AV.KT	equ	135			2: and as a word address
+AV.KSW	equ	137			2: SWWELL's word when this capture began
+AV.KEC	equ	139			the colour << 4, and
+AV.KEI	equ	140			the STAT intensity it began with
+AV.KFST	equ	141			non-zero: it is the frame's first (the one the cache keeps)
+AV.KXO	equ	142			its last colour word's offset, as it ended ($FF: none)
+* The cache (kept from frame to frame: AvgRun does not clear it; the program's start does)
+AV.CVAL	equ	143			non-zero: the cache holds the well as last run whole
+AV.CSW	equ	144			2: SWWELL's word then
+AV.CEC	equ	146			the colour << 4 and
+AV.CEI	equ	147			intensity it was entered with
+AV.CT	equ	148			2: the buffer's word address
+AV.CN	equ	150			its records (window A + $1E00)
+AV.CXO	equ	151			the offset of the last colour word it ran ($FF: none)
+AV.CCOR	equ	152			the colour << 4 it left (when no colour word)
+AV.CINT	equ	153			the intensity it left
+AV.CCOL	equ	154			3: the beam it left, column
+AV.CROW	equ	157			3: and row
+AV.CQ	equ	160			2: Q
+AV.CCLT	equ	162			2: AV.CLT
+AV.CBS	equ	164			binary scale
+AV.CSCL	equ	165			linear scale
+AV.CCLO	equ	166			AV.CLON
+AV.CLSC	equ	167			2: AV.LSCL
+AV.CLEX	equ	169			2: the last record's end, column
+AV.CLEY	equ	171			and row
 
 * AvSTab's entries (avgtab.a, tools/avgview.py shape_table)
 SH.TGT	equ	0			2: the target (word address); $FFFF ends the table
@@ -122,6 +150,12 @@ SHLEN	equ	21
 * switch into the active well buffer.  While AV.WENA is set, the records made inside that call,
 * to the RTSL back out of it, go to window A + $1E00 (WMAX at most: the WMAXth ends the capture,
 * an overflow, and the rest go to the lines) for gfx.a's WellCom.  PortAVG(well=True) specifies it.
+*   The well is run only when it changed: SWWELL jumps into the buffer Atari last built, and Atari
+* builds it only when its shape changes, so while SWWELL's word (and the colour and intensity it is
+* entered with) are the cache's, the frame's first call is skipped: the cached records, their colour
+* bytes from their colour words as they are now (a captured record's byte 7: the word offset, from
+* the buffer, of the colour STAT it was drawn in; $FF none), and the state the well left.  A call
+* run whole and returned from is the cache.  PortAVG(well=True) specifies it, cache and all.
 WELLT	equ	$205
 WMAX	equ	56
 
@@ -197,6 +231,7 @@ AvgRun	pshs	u,dp
 	sta	<AV.WNC
 	sta	<AV.WOVF
 	sta	<AV.WCB
+	sta	<AV.R7
 	endc
 	ldd	#MAXJMP
 	std	<AV.JMP
@@ -357,7 +392,11 @@ _DV	ldx	<AV.RPTR
 	std	<AV.LEX
 _D1	lda	<AV.CLUT		the last record sent (LEX, LEY set before)
 	sta	<AV.LCL
+	ifdef	AVWELL
+	ldb	<AV.R7			(the well's capture: its colour word)
+	else
 	clrb
+	endc
 	std	6,x
 	leax	8,x
 	stx	<AV.RPTR
@@ -665,10 +704,11 @@ _AS3	ldb	,y			Z in bits 7-5
 * AvFlsh - hand the batch to AvgFlush, with the data area's U and DP.
 AvFlsh
 	ifdef	AVWELL
-	tst	<AV.WCAP		the capture is full: an overflow, and it ends
+	tst	<AV.WCAP		the capture is full: an overflow, and it ends (no cache)
 	beq	_AF0
 	inc	<AV.WOVF
-	bra	AvWEnd
+	clr	<AV.CVAL
+	lbra	AvWEnd
 _AF0
 	endc
 	lda	<AV.RMAX
@@ -720,11 +760,228 @@ AvWBeg	ldd	<AV.RPTR
 	sta	<AV.WSP
 	lda	<AV.WNC
 	sta	<AV.WN0
+	clr	<AV.KFST
+	tsta
+	bne	_WB1
+	inc	<AV.KFST		the frame's first
+_WB1	ldx	<AV.VRAM		SWWELL's word, and the buffer it jumps to (else SWWELL itself)
+	ldb	$40A,x
+	lda	$40B,x
+	std	<AV.KSW
+	anda	#$E0
+	cmpa	#$E0
+	bne	_WB2
+	ldd	<AV.KSW
+	anda	#$1F
+	bra	_WB3
+_WB2	ldd	#WELLT
+_WB3	std	<AV.KT
+	lslb
+	rola
+	addd	<AV.VRAM		(a buffer in the ROM gives no colour words: AvWCo)
+	std	<AV.TB6
+	lda	<AV.COLR
+	sta	<AV.KEC
+	lda	<AV.INT
+	sta	<AV.KEI
+	lda	#$FF			no colour word yet
+	sta	<AV.R7
 	inc	<AV.WCAP
 	rts
+
+* AvWCo - a colour STAT inside the capture, Y past it: AV.R7 = its word offset from the buffer
+*   (0-254), or $FF (outside vector RAM, a buffer in the ROM, or too far).
+AvWCo	tfr	y,d
+	subd	#2
+	subd	<AV.VRAM
+	cmpd	#$1000
+	bhs	_WCf
+	ldd	<AV.KT
+	cmpd	#$0800
+	bhs	_WCf
+	tfr	y,d
+	subd	#2
+	subd	<AV.TB6
+	bmi	_WCf
+	lsra
+	rorb
+	tsta
+	bne	_WCf
+	cmpb	#$FF
+	beq	_WCf
+	stb	<AV.R7
+	rts
+_WCf	lda	#$FF
+	sta	<AV.R7
+	rts
+
+* AvWCch - the capture just ended at its RTSL: if it was the frame's first and did not overflow,
+*   the cache is it (its records stay at window A + $1E00).
+AvWCch	tst	<AV.KFST
+	beq	_WH1
+	tst	<AV.WOVF
+	bne	_WH1
+	ldd	<AV.KSW
+	std	<AV.CSW
+	lda	<AV.KEC
+	sta	<AV.CEC
+	lda	<AV.KEI
+	sta	<AV.CEI
+	ldd	<AV.KT
+	std	<AV.CT
+	lda	<AV.WNC
+	sta	<AV.CN
+	lda	<AV.KXO
+	sta	<AV.CXO
+	lda	<AV.COLR
+	sta	<AV.CCOR
+	lda	<AV.INT
+	sta	<AV.CINT
+	ldd	<AV.COL
+	std	<AV.CCOL
+	lda	<AV.COL+2
+	sta	<AV.CCOL+2
+	ldd	<AV.ROW
+	std	<AV.CROW
+	lda	<AV.ROW+2
+	sta	<AV.CROW+2
+	ldd	<AV.Q
+	std	<AV.CQ
+	ldd	<AV.CLT
+	std	<AV.CCLT
+	lda	<AV.BS
+	sta	<AV.CBS
+	lda	<AV.SCL
+	sta	<AV.CSCL
+	lda	<AV.CLON
+	sta	<AV.CCLO
+	ldd	<AV.LSCL
+	std	<AV.CLSC
+	ldd	<AV.LEX
+	std	<AV.CLEX
+	lda	<AV.LEY
+	sta	<AV.CLEY
+	lda	#1
+	sta	<AV.CVAL
+_WH1	rts
+
+* AvWSkp - the well not run (JSRL to it, Y at the JSRL): the cache's records recoloured from their
+*   colour words, AV.WNC, the state the well left; on past the JSRL.
+AvWSkp	ldd	<AV.CT
+	lslb
+	rola
+	addd	<AV.VRAM
+	std	<AV.TB6
+	ldx	<AV.WBUF
+	ldb	<AV.CN
+	beq	_WK2
+	stb	<AV.T0
+_WK1	ldb	7,x			its colour word
+	cmpb	#$FF
+	beq	_WKn
+	clra
+	lslb
+	rola
+	addd	<AV.TB6
+	pshs	x
+	tfr	d,x
+	lda	,x			(the word's low byte: the colour in its low nibble)
+	puls	x
+	anda	#$0F
+	lsla
+	lsla
+	lsla
+	lsla
+	pshs	a
+	lda	6,x
+	anda	#$0F
+	ora	,s+
+	sta	6,x
+_WKn	leax	8,x
+	dec	<AV.T0
+	bne	_WK1
+	lda	-2,x			the last record: the one the dot rule sees
+	sta	<AV.LCL
+	ldd	<AV.CLEX
+	std	<AV.LEX
+	lda	<AV.CLEY
+	sta	<AV.LEY
+_WK2	lda	<AV.CN
+	sta	<AV.WNC
+	ldd	<AV.CCOL
+	std	<AV.COL
+	lda	<AV.CCOL+2
+	sta	<AV.COL+2
+	ldd	<AV.CROW
+	std	<AV.ROW
+	lda	<AV.CROW+2
+	sta	<AV.ROW+2
+	ldd	<AV.CQ
+	std	<AV.Q
+	ldd	<AV.CCLT
+	std	<AV.CLT
+	lda	<AV.CBS
+	sta	<AV.BS
+	lda	<AV.CSCL
+	sta	<AV.SCL
+	lda	<AV.CCLO
+	sta	<AV.CLON
+	ldd	<AV.CLSC
+	std	<AV.LSCL
+	lda	<AV.CXO			the colour it left: its last colour word as it is now
+	cmpa	#$FF
+	beq	_WK3
+	ldb	<AV.CXO
+	clra
+	lslb
+	rola
+	addd	<AV.TB6
+	tfr	d,x
+	lda	,x
+	anda	#$0F
+	lsla
+	lsla
+	lsla
+	lsla
+	bra	_WK4
+_WK3	lda	<AV.CCOR
+_WK4	sta	<AV.COLR
+	lda	<AV.CINT
+	sta	<AV.INT
+	ora	<AV.COLR
+	sta	<AV.STCL
+	leay	2,y
+	lbra	AvLoop
+
+* AvLast - the list is done, the last batch not yet sent: the platform's AvgLast may add records
+*   to it (X = where, B = the room; it returns B = how many), with U = the data area, DP its page.
+AvLast	ldx	<AV.RPTR
+	ldb	<AV.RLFT
+	pshs	y,u,dp
+	ldu	<AV.DATA
+	pshs	b
+	tfr	u,d
+	tfr	a,dp
+	puls	b
+	lbsr	AvgLast
+	puls	y,u,dp
+	tstb
+	beq	_AL1
+	pshs	b
+	lda	#8
+	mul
+	addd	<AV.RPTR
+	std	<AV.RPTR
+	lda	<AV.RLFT
+	suba	,s+
+	sta	<AV.RLFT
+_AL1	rts
 * AvWEnd - the capture ends: its count (all calls') to AV.WNC, the line batch back, less the room
 *   this capture's records took (AV.WCB); a batch left with none is flushed.  X, Y kept.
-AvWEnd	lda	#WMAX
+AvWEnd	lda	<AV.R7			its last colour word (AvWCch), and records outside it get 0
+	sta	<AV.KXO
+	clr	<AV.R7
+	lda	#WMAX
 	suba	<AV.RLFT
 	sta	<AV.WNC
 	suba	<AV.WN0		A = this capture's records
@@ -762,6 +1019,12 @@ AvStat	lda	1,y
 	stb	<AV.COLR
 	orb	<AV.INT
 	stb	<AV.STCL
+	ifdef	AVWELL
+	tst	<AV.WCAP		in the well: its records' colour word from here
+	beq	_STw
+	lbsr	AvWCo
+_STw
+	endc
 	lbra	AvLoop
 _ST1	lsrb				intensity
 	lsrb
@@ -878,7 +1141,23 @@ _JS3
 	ldd	<AV.T
 	cmpd	#WELLT
 	bne	_JS4
-	lbsr	AvWBeg
+	tst	<AV.WNC			the frame's first call, the cache's well?
+	bne	_JS5
+	tst	<AV.CVAL
+	beq	_JS5
+	ldx	<AV.VRAM
+	ldb	$40A,x			SWWELL's word (low byte first)
+	lda	$40B,x
+	cmpd	<AV.CSW
+	bne	_JS5
+	lda	<AV.COLR
+	cmpa	<AV.CEC
+	bne	_JS5
+	lda	<AV.INT
+	cmpa	<AV.CEI
+	bne	_JS5
+	lbra	AvWSkp			yes: not run
+_JS5	lbsr	AvWBeg
 _JS4
 	endc
 	ldb	<AV.SP
@@ -931,6 +1210,7 @@ AvRtsl	ldd	<AV.JMP
 	cmpa	<AV.WSP
 	bne	_RT1
 	lbsr	AvWEnd
+	lbsr	AvWCch			run whole and back: the cache
 _RT1
 	endc
 	lbra	AvLoop
@@ -951,10 +1231,11 @@ AvJmpl	lda	1,y
 AvHalt	inc	<AV.END
 AvStop
 	ifdef	AVWELL
-	tst	<AV.WCAP		the list ended inside the well: the capture ends
+	tst	<AV.WCAP		the list ended inside the well: the capture ends, no cache
 	beq	_SP1
+	clr	<AV.CVAL
 	lbsr	AvWEnd
-_SP1
+_SP1	lbsr	AvLast			the platform's last records, into the last batch
 	endc
 	lbsr	AvFlsh
 	puls	u,dp,pc
@@ -1162,7 +1443,11 @@ _SHr2	ldd	<AV.LR			a record a row, top to bottom
 	std	<AV.LEX
 	lda	<AV.CLUT
 	sta	<AV.LCL
+	ifdef	AVWELL
+	ldb	<AV.R7
+	else
 	clrb
+	endc
 	std	6,x
 	leax	8,x
 	stx	<AV.RPTR

@@ -59,6 +59,9 @@ AvgFlush\ttstb\t\t\t(AVWELL: 0 when the batch held only the well's room)
 \tbeq\t_AFz
 \tstb\t$%04X
 _AFz\trts
+* AVWELL: the platform's AvgLast adds nothing here.
+AvgLast\tclrb
+\trts
 """ % FLUSH_PORT
 
 
@@ -96,6 +99,8 @@ class Rig:
         self.cpu.map_io(FLUSH_PORT, FLUSH_PORT, write=self.flush)
         self.cp = bytearray(32)
         self.cpu.map_io(0xFEE0, 0xFEFF, self.cp_read, self.cp_write)
+        self.keep_pg = bytes(256 - 132)     # AVWELL: the well's cache (AVGPG + 132 on) and the
+        self.keep_wa = bytes(0x200)         # capture (window A + $1E00) live from frame to frame
 
     def cp_check(self, a):
         if not self.cpu.cc & 0x10:
@@ -138,6 +143,9 @@ class Rig:
         cpu.mem[self.win:self.win + 4096] = vram
         cpu.mem[self.win + 4096:self.win + 8192] = bytes([0xA5]) * 4096
         cpu.mem[self.data:self.data + 0x2000] = bytes([0x5A]) * 0x2000
+        if WELL:
+            cpu.mem[self.data + AVGPG + 132:self.data + AVGPG + 256] = self.keep_pg
+            cpu.mem[self.win + 0x1E00:self.win + 0x2000] = self.keep_wa
         struct.pack_into(">H", cpu.mem, self.data + VWIN, self.win)
         cpu.mem[self.data + AVGPG + OFF["RMAX"]] = random.randrange(1, 256) if BATCH_RANDOM else 0
         cpu.mem[self.data + AVGPG + OFF["WENA"]] = 1 if WELL else 0
@@ -155,15 +163,16 @@ class Rig:
         for k in range(min(ntxt, 300)):
             b = cpu.mem[t0 + 6 * k:t0 + 6 * k + 6]
             texts.append((b[0], b[1], s16(b[2] << 8 | b[3]), s16(b[4] << 8 | b[5])))
-        self.wrecs, self.wovf = [], 0
+        self.wrecs, self.wr7, self.wovf = [], [], 0
         if WELL:
             w0 = self.win + 0x1E00
             for k in range(cpu.mem[pg + OFF["WNC"]]):
                 b = cpu.mem[w0 + 8 * k:w0 + 8 * k + 8]
-                if b[7]:
-                    self.errors.append("a well record's reserved byte is %02X" % b[7])
                 self.wrecs.append((s16(b[0] << 8 | b[1]), b[4], s16(b[2] << 8 | b[3]), b[5], b[6]))
+                self.wr7.append(b[7])
             self.wovf = cpu.mem[pg + OFF["WOVF"]]
+            self.keep_pg = bytes(cpu.mem[pg + 132:pg + 256])
+            self.keep_wa = bytes(cpu.mem[self.win + 0x1E00:self.win + 0x2000])
         return cycles, texts, cpu.mem[pg + OFF["END"]]
 
 
@@ -251,18 +260,35 @@ def random_list(rng, rom, shapes=(), well=False):
     return bytes(vram)
 
 
+def recolour(rng, vram):
+    """the list again, some colour STATs' colours changed (a well skipped, recoloured)"""
+    v = bytearray(vram)
+    for p in range(0, 0x1000, 2):
+        w = v[p] | v[p + 1] << 8
+        if w >> 13 == 3 and not w & 0x1000 and w & 0x800 and rng.random() < 0.3:
+            w = (w & ~0xF) | rng.randrange(16)
+            v[p], v[p + 1] = w & 0xFF, w >> 8
+    return bytes(v)
+
+
 def fuzz(a, code, labels):
     import random
     rng = random.Random(a.seed)
     rigs = [Rig(code, labels, lay) for lay in LAYOUTS]
     rom = open(os.path.join(SRC, "vrom.bin"), "rb").read()
-    port = av.PortAVG(rom, collapse=a.collapse, well=a.well)
+    ports = [av.PortAVG(rom, collapse=a.collapse, well=a.well) for _ in rigs]
+    port = ports[0]
     shapes = sorted(port.shapes) if a.collapse else ()
-    ovfs = 0
+    ovfs = skips = 0
+    prev = [None, None]
     fails = 0
     collapsed = 0
     for i in range(a.fuzz):
         vram = random_list(rng, rom, shapes, a.well)
+        if a.well and prev[i % 2] and rng.random() < 0.5:
+            vram = recolour(rng, prev[i % 2])         # the same list, colour words changed: a skip
+        prev[i % 2] = vram
+        port = ports[i % 2]
         rig = rigs[i % 2]
         recs, texts = port.run(vram)
         collapsed += port.stats["collapsed"]
@@ -279,9 +305,12 @@ def fuzz(a, code, labels):
             bad.append("ended %d, want %d" % (ended, port.stats["ended"]))
         if a.well:
             ovfs += port.wovf
+            skips += port.stats["wskip"]
             if rig.wrecs != [tuple(r) for r in port.wrecs] or bool(rig.wovf) != port.wovf:
                 bad.append("well: %d records (overflow %d), want %d (%s)" %
                            (len(rig.wrecs), rig.wovf, len(port.wrecs), port.wovf))
+            elif rig.wr7 != port.wr7:
+                bad.append("well: colour words %s, want %s" % (rig.wr7[:8], port.wr7[:8]))
         if bad:
             fails += 1
             if fails <= 10:
@@ -290,7 +319,8 @@ def fuzz(a, code, labels):
                     print("   ", b)
     print("fuzz: %d random lists, %d failed%s%s" % (a.fuzz, fails, (", %d shapes collapsed" % collapsed)
                                                     if a.collapse else "",
-                                                    (", %d well overflows" % ovfs) if a.well else ""))
+                                                    (", %d well overflows, %d skips" % (ovfs, skips))
+                                                    if a.well else ""))
     sys.exit(1 if fails else 0)
 
 
@@ -322,13 +352,14 @@ def main():
     rigs = [Rig(code, labels, lay) for lay in LAYOUTS]
     fails = 0
     allcyc = []
+    wskips = 0
     for cap in a.captures:
         port = None
         cyc = []
         k = 0
         for item in av.read_capture(cap):
             if item[0] == "rom":
-                port = av.PortAVG(item[1], collapse=a.collapse, well=a.well)
+                ports = [av.PortAVG(item[1], collapse=a.collapse, well=a.well) for _ in rigs]
                 continue
             _, n, vram, cram = item
             if n < a.first:
@@ -339,7 +370,9 @@ def main():
             if a.limit and len(cyc) >= a.limit:
                 break
             rig = rigs[len(cyc) % 2]
+            port = ports[len(cyc) % 2]         # each layout keeps its own well cache
             recs, texts = port.run(vram)
+            wskips += port.stats.get("wskip", 0)
             cycles, gtexts, ended = rig.run(vram)
             cyc.append(cycles)
             want_recs = [(r[0], r[1], r[2], r[3], r[4]) for r in recs]
@@ -356,7 +389,8 @@ def main():
                            (len(gtexts), len(texts), i, gtexts[i:i + 1], texts[i:i + 1]))
             if ended != port.stats["ended"]:
                 bad.append("ended %d, want %d" % (ended, port.stats["ended"]))
-            if a.well and (rig.wrecs != [tuple(r) for r in port.wrecs] or bool(rig.wovf) != port.wovf):
+            if a.well and (rig.wrecs != [tuple(r) for r in port.wrecs] or bool(rig.wovf) != port.wovf
+                           or rig.wr7 != port.wr7):
                 bad.append("well: %d records (overflow %d), want %d (%s)" %
                            (len(rig.wrecs), rig.wovf, len(port.wrecs), port.wovf))
             if bad:
@@ -371,6 +405,8 @@ def main():
         report(os.path.basename(cap), cyc)
     if len(a.captures) > 1:
         report("all", allcyc)
+    if a.well:
+        print("the well skipped (not run) in %d frames" % wskips)
     print("%d frames, %d failed" % (len(allcyc), fails))
     sys.exit(1 if fails else 0)
 

@@ -95,6 +95,7 @@ WLE1                rmb       1                   and the last
 WLNEW               rmb       2                   window A + $1E00: this frame's well (avg.a)
 WLDST               rmb       2                   scratch: where the next picked record goes
 TXALL               rmb       1                   non-zero: TxCommit draws every entry again
+WLDONE              rmb       1                   non-zero: AvgLast added the well's off-colour records to the batch
 WLOLD               rmb       56*8                the well as last seen (avg.a WMAX records)
 
 * the frame loop

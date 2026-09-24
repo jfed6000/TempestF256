@@ -478,35 +478,89 @@ wa1                 bsr       WlCv1
                     leax      $1000,x
                     bra       WlSend
 
-* WellCom - the frame's well (above).  A, B, X, Y clobbered.
-WellCom             ldx       VWIN,u
+* WlSame - WLNEW, WLN, and WLSAM: this frame's well has WLOLD's geometry.
+WlSame              ldx       VWIN,u
                     leax      $1E00,x
                     stx       WLNEW,u
                     clr       WLSAM,u
                     ldb       AVGPG+AV.WNC,u
                     stb       WLN,u
-                    beq       wl2                 no well: not the same
+                    beq       ws9                 no well: not the same
                     tst       AVGPG+AV.WOVF,u
-                    bne       wl2
+                    bne       ws9
                     cmpb      WLON,u
-                    bne       wl2
-                    leay      WLOLD,u             the same geometry, record for record?
+                    bne       ws9
+                    leay      WLOLD,u             record for record
                     pshs      b
-wl1                 ldd       ,x
+ws1                 ldd       ,x
                     cmpd      ,y
-                    bne       wl1n
+                    bne       ws8
                     ldd       2,x
                     cmpd      2,y
-                    bne       wl1n
+                    bne       ws8
                     ldd       4,x
                     cmpd      4,y
-                    bne       wl1n
+                    bne       ws8
                     leax      8,x
                     leay      8,y
                     dec       ,s
-                    bne       wl1
+                    bne       ws1
                     inc       WLSAM,u
-wl1n                leas      1,s
+ws8                 leas      1,s
+ws9                 rts
+
+* AvgLast - from the interpreter, the list done and its last batch not yet
+*   sent (avg.a AvLast): X = where a record may go, B = the room.  With
+*   the well in the back layer and the same geometry, its records not in
+*   the back layer's colour (the player's lane) join that batch - no call
+*   of their own; WLDONE then tells WellCom there is nothing left to do.
+*   Out: B = the records added.  A, X, Y clobbered.
+AvgLast             stx       WLDST,u
+                    stb       WLI,u               the room
+                    clr       WLK,u
+                    clr       WLDONE,u
+                    bsr       WlSame
+                    tst       WLST,u
+                    beq       alx
+                    tst       WLSAM,u
+                    beq       alx
+                    ldx       WLNEW,u
+                    leay      WLOLD,u
+                    ldb       WLN,u
+                    stb       WLT,u
+al1                 lda       6,x
+                    cmpa      6,y
+                    beq       aln
+                    tst       WLI,u
+                    beq       alx                 no room: WellCom sends them (all again)
+                    pshs      y
+                    ldy       WLDST,u
+                    ldd       ,x                  as it is (AvgFlush makes it 640), byte 7 0
+                    std       ,y
+                    ldd       2,x
+                    std       2,y
+                    ldd       4,x
+                    std       4,y
+                    lda       6,x
+                    clrb
+                    std       6,y
+                    leay      8,y
+                    sty       WLDST,u
+                    puls      y
+                    inc       WLK,u
+                    dec       WLI,u
+aln                 leax      8,x
+                    leay      8,y
+                    dec       WLT,u
+                    bne       al1
+                    inc       WLDONE,u
+alx                 ldb       WLK,u
+                    rts
+
+* WellCom - the frame's well (above), after the list's last batch is
+*   sent.  A, B, X, Y clobbered.
+WellCom             tst       WLDONE,u            AvgLast put what there was into the batch
+                    lbne      wlx
 wl2                 lda       #BMTXT
                     sta       BSBM,u
                     tst       WLST,u

@@ -426,14 +426,6 @@ TsStps               fcb       150,0,$FF,150,1,$FF,150,2,$FF,150,3,$FF,150,4,$FF
                     fcb       240,6,2,240,3,1
                     fcb       0
 
-TsHelp              fcc       "tsnd - Tempest's sounds on the SIDs"
-                    fcb       C$CR,C$LF
-                    fcc       "0 cursor  1 explosion  2 fire  3 pulsation  4 special"
-                    fcb       C$CR,C$LF
-                    fcc       "5 dies  6 thrust tube  7 thrust space  8 enemy shot"
-                    fcb       C$CR,C$LF
-                    fcc       "9 enemy line  a slam  b 3 seconds  c pulsar off"
-                    fcb       C$CR,C$LF
-                    fcc       "r the sequence  x stop  q quit"
+TsHelp              fcc       "tsnd: 0-9 a-c sounds, r sequence, x stop, q quit"
                     fcb       C$CR,C$LF
 TsHlpL              equ       *-TsHelp

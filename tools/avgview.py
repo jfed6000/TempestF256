@@ -408,6 +408,7 @@ class PortAVG:
     def __init__(self, rom, glyphs=True, collapse=False, well=False):
         self.rom = rom
         self.well = well           # capture the well (avg.a AVWELL): its records to self.wrecs
+        self.wcache = None         # the well as last run whole (below), kept from frame to frame
         self.gmap = {}             # target word -> glyph index (first VGMSGA entry using it)
         self.gtab = {}             # (index, big) -> (dcol, drow, scale_after, intensity or 0)
         if glyphs:
@@ -425,22 +426,26 @@ class PortAVG:
         q = q_for(0, 0)
         col, row = 160 << 8, 120 << 8
         recs, texts = [], []
-        wrecs, wcap, wsp, wovf = [], False, 0, False
+        wrecs, wr7, wcap, wsp, wovf = [], [], False, 0, False
+        cap, r7 = None, 0          # this capture's start; a record's byte 7 (its colour word)
         last = None                # the last record sent, to either list (avg.a AV.LEX/LEY/LCL)
 
         def emit(rec):
-            # a record: to the well's capture while it runs (the WMAXth ends it, an overflow), else
-            # to the line list
-            nonlocal wcap, wovf, last
+            # a record: to the well's capture while it runs (the WMAXth ends it, an overflow, and
+            # forgets the cache), else to the line list.  A captured record carries r7: the word
+            # offset, from the well's buffer, of the colour STAT it was drawn in ($FF: none there)
+            nonlocal wcap, wovf, last, r7
             last = rec
             if wcap:
                 wrecs.append(rec)
+                wr7.append(r7)
                 if len(wrecs) == self.WMAX:
-                    wcap, wovf = False, True
+                    wcap, wovf, r7 = False, True, 0
+                    self.wcache = None
             else:
                 recs.append(rec)
         st = {"instructions": 0, "vectors": 0, "glyphs": 0, "clipped": 0, "dropped": 0, "full": 0,
-              "ended": 0, "centred": 0, "statint": 0, "dots": 0, "collapsed": 0}
+              "ended": 0, "centred": 0, "statint": 0, "dots": 0, "collapsed": 0, "wskip": 0}
         self.trace = []
         jumps = self.MAXJUMPS
         while jumps:
@@ -488,6 +493,9 @@ class PortAVG:
                     q = q_for(scale, bs)
                 elif w & 0x800:
                     color = w & 0xF
+                    if wcap:                  # its word offset in the buffer, both in vector RAM
+                        off = (pc - 1) - cap["t"]
+                        r7 = off if pc - 1 < 0x800 and cap["t"] < 0x800 and 0 <= off <= 254 else 0xFF
                 else:
                     intensity = (w >> 4) & 0xF
             elif op == 4:
@@ -535,8 +543,30 @@ class PortAVG:
                     continue
                 jumps -= 1
                 if self.well and not wcap and not wovf and t == self.WELLT and jumps:
-                    wcap, wsp = True, sp          # the well: until the RTSL back to this depth;
-                                                  # another call adds to the same capture
+                    # the well.  SWWELL (word $205) jumps into the buffer Atari last built: while
+                    # that word, and the colour and intensity it is entered with, are the cache's,
+                    # it is not run: the cache's records, recoloured from their colour words as
+                    # they are now, and the state it left.  The frame's first call only.
+                    sw = vg_word(mem, self.WELLT)
+                    c = self.wcache
+                    if not wrecs and c and (c["sw"], c["ec"], c["ei"]) == (sw, color, intensity):
+                        for rec, off in c["recs"]:
+                            clut = rec[4]
+                            if off != 0xFF:
+                                clut = (vg_word(mem, c["t"] + off) & 0xF) << 4 | clut & 0xF
+                            wrecs.append(rec[:4] + (clut,))
+                            wr7.append(off)
+                        col, row, bs, scale, q = c["exit"]
+                        color = vg_word(mem, c["t"] + c["xco"]) & 0xF if c["xco"] != 0xFF else c["xcolor"]
+                        intensity = c["xint"]
+                        if wrecs:
+                            last = wrecs[-1]
+                        st["wskip"] += 1
+                        continue
+                    cap = {"first": not wrecs, "sw": sw, "ec": color, "ei": intensity,
+                           "t": sw & 0x1FFF if sw >> 13 == 7 else self.WELLT}
+                    wcap, wsp, r7 = True, sp, 0xFF   # until the RTSL back to this depth;
+                                                    # another call adds to the same capture
                 stack[sp & 3] = pc
                 sp = (sp + 1) & 0xF
                 pc = t
@@ -546,6 +576,11 @@ class PortAVG:
                 pc = stack[sp & 3]
                 if wcap and sp == wsp:
                     wcap = False
+                    if cap["first"]:                # run whole, and back: the cache
+                        self.wcache = {"sw": cap["sw"], "ec": cap["ec"], "ei": cap["ei"], "t": cap["t"],
+                                       "recs": list(zip(wrecs, wr7)), "exit": (col, row, bs, scale, q),
+                                       "xco": r7, "xcolor": color, "xint": intensity}
+                    r7 = 0
             else:
                 jumps -= 1
                 pc = w & 0x1FFF
@@ -554,7 +589,9 @@ class PortAVG:
                     break
         self.stats = st
         self.state = (col, row, bs, scale, color, intensity, sp)
-        self.wrecs, self.wovf = wrecs, wovf
+        if wcap:                                    # the list ended inside it: no cache
+            self.wcache = None
+        self.wrecs, self.wr7, self.wovf = wrecs, wr7, wovf
         return recs, texts
 
 

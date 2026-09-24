@@ -1435,6 +1435,43 @@ its shape changes, `ROTDIS`), do not run it at all: restore that state and charg
 its colour `STAT`s changed, run it as now. And put the off-colour records in the frame's batch, not a
 call of their own.
 
+## The well out of the loop (2026-09-24, host and MAME) — untested on hardware
+
+User: "Don't we know when the well changes? ... take the well out of the loop for real"; "why not just
+change it when the level changes?"; "the highlighted lane ... should just be added to the array for
+the one call". **Atari rebuilds the well only when its shape changes, into the spare buffer, and
+then switches SWWELL's jump to it**, so SWWELL's word changing is the well changing: no checksum.
+The captures: SWWELL always jumps to `$206` or `$2A7`; each buffer is one straight run (a `CNTR`, a
+`SCAL`, 49-66 vectors, 17 colour STATs, `RTSL`), no jump elsewhere. The user's CLUT idea
+(recolouring by CLUT, not by drawing) does not fit: the 640 planes have 16 colour indices, shared
+with the text, and the well has 16 lanes and 48 segments.
+
+- **`avg.a`**: at the frame's first call into the well, **if SWWELL's word, and the colour and
+  intensity it is entered with, are the cache's, the well is not run**: the cached records at
+  window A + `$1E00`, each recoloured from the colour word it was drawn in (a captured record's
+  byte 7: the word offset from the buffer, `$FF` none), and the interpreter's state as the well
+  left it (beam, Q, scales, colour from its last colour word, intensity, the dot rule's last
+  record). A call run whole and returned from is the cache; an overflow, or the list ending inside
+  it, forgets it. Nothing is charged for a skipped well. **`AvLast`**: before the list's last batch
+  is sent, the platform's `AvgLast` may add records to it.
+- **`gfx.a`**: `AvgLast` puts the well's records not in the back layer's colour (the player's
+  lane) **into that last batch: no call of their own**; `WellCom` does the rest after the flush.
+- **Checked**: `PortAVG(well=True)` specifies it, cache and all. On the frame-by-frame capture
+  (`captures/avg_play_every.bin`, 120 s of play from stock MAME, every video frame) the skip gives
+  **exactly** what running the well whole does in all 6,602 frames (3,870 skipped); on the sampled
+  captures it does not always (436 of 3,481: the game rebuilt twice between samples, back to the
+  same buffer; the port sees every game frame). `avgtest.py --well`: **6,282 frames exact** (both
+  multiplies; the well skipped in 3,609), **the frame-by-frame capture 6,602 exact** (3,464 skipped;
+  its 36 power-up frames fail with or without the well: vector RAM before the game wrote it, which
+  the specification leaves open), **fuzz 20,000, 0 failed** (3,390 skips: a rig's last list again,
+  some colour words changed; 1,617 overflows). The interpreter: **median 13.5 -> 11.1 ms** on the
+  captures, 10.0 frame by frame.
+- **`osrun.py` 120 s: 16.9 game frames a second (15.0 before)**, median 2.5 ticks a game frame (3.1),
+  43 ticks lost in 7,200, every check right. `sndtest.py`: game 3,557 and tsnd 2,699 passes, 0 wrong.
+  The Wildbits MAME (call counts): **839 `SS.BmLine` calls in 29 s**, against 1,201 with `tempest w`
+  and 1,800 for the build before. **Module 40,178 bytes of 40,192: 14 left** (tsnd's help is one
+  line now). On both disk images.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
