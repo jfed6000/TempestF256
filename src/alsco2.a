@@ -1645,19 +1645,19 @@ _LOGQ2
 _ALSCO2_1120
 *					ALSCO2:1334 ENDIF
 	pshs	cc				the store must keep N, Z
-	sta	FARY,u			ALSCO2:1335 STA FARY
 	ifdef	LOGOQK
-	cmpa	NEARY,u			PORT: merged, the front arrived: the logo's pause
-	bne	_LOGQ3			(QTMPAUS, 223 game frames for the whole logo) holds
-	cmpa	#$30			LOGHD frames at most from here
+	cmpa	FARY,u			PORT: the frame the trail closes on the arrived front,
+	beq	_LOGQ3			the logo's pause (QTMPAUS: Atari gives the whole logo
+	cmpa	NEARY,u			223 game frames) is set to LOGHD: the still logo's hold
+	bne	_LOGQ3
+	ldb	NEARY,u
+	cmpb	#$30
 	bhs	_LOGQ3
-	lda	<QTMPAU
-	cmpa	#LOGHD
-	bls	_LOGQ3
-	lda	#LOGHD
-	sta	<QTMPAU
+	ldb	#LOGHD
+	stb	<QTMPAU
 _LOGQ3
 	endc
+	sta	FARY,u			ALSCO2:1335 STA FARY
 	puls	cc
 _ALSCO2_1122
 *					ALSCO2:1336 ENDIF

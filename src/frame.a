@@ -33,7 +33,7 @@ AVCOLL              equ       1                   small shapes collapsed (avg.a 
 AVWELL              equ       1                   the well drawn once into the back layer (gfx.a WellCom)
 LOGOQK              equ       1                   the logo's quiet end shortened (alsco2.a LOGPRO): the
 LOGMS               equ       4                   trail closes 4 a frame once the front arrives (Atari: 1),
-LOGHD               equ       27                  and the merged logo holds 27 game frames (~1 s) at most
+LOGHD               equ       90                  and the merged logo holds 90 game frames (~4 s at 21 a second)
                     ifndef    LOGSKP
 LOGSKP              equ       2                   every other copy of the attract logo not drawn (avg.a)
                     endc
