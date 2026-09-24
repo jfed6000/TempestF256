@@ -1518,6 +1518,14 @@ batches) 0 failed; `osrun.py` 60 s 16.3 game frames a second, every check right;
 2,699 and game 3,542 passes, 0 wrong; the Wildbits MAME: the game and its sign-off. On both disk
 images (with the 8,192 driver).
 
+## Hardware: the cleaned build with the 8,192 driver (user, 2026-09-24)
+
+`a1930b6` on the K2: **3,707 game frames, 15,263 passes in 254 s: 14.6 game frames and 60.1 passes
+a second; 9,563 line calls, 0 short** (4.1 passes and 2.6 calls a game frame). Between the cached
+89 s run (17.9; 3.4 and 2.0) and `tempest w`'s 196 s (12.9; 4.7 and 2.9): **play runs of different
+lengths reach different levels, so they cannot rank builds.** Proposed from now on: **an attract-mode
+benchmark** (start, no coin, 2 minutes, `q`), the same sequence every time, beside play for the feel.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
