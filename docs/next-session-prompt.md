@@ -16,35 +16,29 @@ READ FIRST:
   - docs/port-guide.md (generic platform guide) and, from ~/projects/wild/joust/docs, only as needed:
     grfdrv256-api.md, bitmap-api.md, driver-performance.md.
 
-WHERE THINGS STAND (2026-09-23, end of the optimisation session; docs/status.md "Optimising, and
-640x240" has it all):
-  - main 6b76ef7 + dacdbbb: the split frame (one pass a tick), the clear armed in the logic pass
-    (SS.BmClear mode 7 waited a whole tick for vertical blank: one tick lost a game frame), the
-    text list matched with a look-ahead (the high score screen no longer redraws every entry).
-    K2, 320: 15.4 game frames and 59.8 passes a second.
-  - BRANCH hires640 (checked out): the lines AND the text on 640x240 4-bit planes (SS.BmCfg
-    HIRES4, CLUT 1, colour + 1 as the nibble, intensity 12); glyphs rendered at 640 with 1-dot
-    strokes (tools/glyphs.py --hires); text columns in 640ths from the beam's fraction (avg.a
-    AVTX64). K2: 13.0 game frames a second with attract in the run, no ticks lost; "looks
-    better". The logo's smear is the 240 rows (MAME's own frame drawn at 640x240 shows it).
-    Line endpoints are still a 320 position doubled. Not merged into main: my call.
-  - nitros9 wb/multiterm ec0cc198 (committed, NOT PUSHED): SS.BmLine takes X to 639 with a
-    640-pixel FIFO margin on a HIRES4 plane. On both disk images with the hires640 tempest.
-  - tools/osrun.py now models the DMA engine's vertical-blank timing, GetStat SS.BmClear's
-    diagnostic R$Y/R$U, SS.BmCfg, 4-bit planes and CLUT 1.
+WHERE THINGS STAND (2026-09-24, end of the performance session; docs/status.md from "Hardware:
+the collapse and BmWait build works" on has every step, each marked confirmed or untested):
+  - BRANCH hires640 (checked out, c0a1f59, 39 commits past main, not merged: my call). 640x240
+    HIRES4 planes. K2: 19.8 game frames a second (4,230 in 214 s, 5 dropped), up from 13.0.
+    In order: small shapes collapsed to dots (AVCOLL), BmWait gone, sound on the two SIDs
+    (POKEY image; the SIDs reached by a direct MMU slot write, interrupts masked: SidOn/SidOff,
+    an approved exception), layers (0 tile map off, 1 lines, 2 text and the well), the well
+    cached and skipped while its SWWELL word and colour hold (AVWELL), the 8,192-entry line FIFO,
+    the stick read only when used, the SOL clock (/fSOL line-0 signal counts ticks, passes catch
+    up lost ticks, muted in pause), no split (a game frame = a logic pass + a whole drawing; the
+    budgets removed), the title logo: every other trail copy skipped (LOGSKP 2), the merge 4 a
+    frame and the hold set to 90 frames (LOGOQK, LOGMS, LOGHD). All confirmed on the K2.
+  - nitros9 wb/multiterm ec0cc198 (SS.BmLine X to 639 on HIRES4) and c45760ab (LD.Depth 8192,
+    the new core's line FIFO): committed, NOT PUSHED. Installed on both disk images.
+  - main dacdbbb: the 320 build from 2026-09-23 (15.4 game frames a second).
 
-THIS SESSION: Q&A AND BRAINSTORMING ON PERFORMANCE. I want to understand what the interpreter
-(src/avg.a, its specification tools/avgview.py PortAVG, docs/status.md "Stage 2 on the host") does:
-walk me through it at my pace, answer questions, and brainstorm where the frame's time goes and how
-to win it back (the numbers: docs/status.md "Time", "The split frame", "Optimising"). Explain and
-propose; change code only when I ask. Candidate ideas already written down: tighter budget
-estimates (RECUS), overlapping the logic with the drawing, the raster row as an exact clock (a new
-absolute-address exception, my call), faster glyph drawing, fewer logo copies, tline S.
+NEXT SESSION: my call. Open items: docs/status.md "Open items".
 
 GROUND RULES (from Joust, all still in force): Level 2 only. Position-independent code, OS-9 program
 modules, data through DP/U; a "make pic" check like Joust's tools/piccheck.py. No direct MMU access from
-programs (F$MapBlk and F$ClrBlk only). The approved absolute I/O addresses are the VS1053 at
-$FF50-$FF57 and the math coprocessor at $FEE0-$FEFF (D8; tools/piccheck.py knows both). Addresses come from the rc16 memory map, https://nitrobotics.github.io/Wildbits/ and, above
+programs (F$MapBlk and F$ClrBlk only) except SidOn/SidOff's slot write (approved 2026-09-23). The
+approved absolute I/O addresses are the VS1053 at $FF50-$FF57, the math coprocessor at $FEE0-$FEFF
+(D8) and the MMU at $FFA0-$FFAF (tools/piccheck.py knows all three). Addresses come from the rc16 memory map, https://nitrobotics.github.io/Wildbits/ and, above
 both, the FPGA source in ~/projects/wild/joust/fpga-6809-cores-staging/, a READ-ONLY clone: never modify,
 commit or push anything inside it (it does not have the DMA fix yet). Propose new SS call layouts, and
 any change to an existing one, for my review before coding. DON'T MODIFY MAME, either copy.

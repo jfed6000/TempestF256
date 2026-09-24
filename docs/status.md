@@ -1639,7 +1639,7 @@ frames drawn** (a logo drawing is now one pass of ~4-5 ticks and seldom reaches 
 all of attract 17.8 game frames a second (13.6). The arcade's is ~4 s; a lower `SKIPT` would go
 faster, choppier, and would drop in play's heaviest moments too.
 
-## The logo's trail thinned (2026-09-24, host and MAME) — untested on hardware
+## The logo's trail thinned (2026-09-24) — confirmed on the K2 (LOGSKP 2)
 
 User: "Logo looks faster, but it would be nice to make it even faster. What if we removed every
 third TEMPEST or every fourth one". The trail is the list at `$101`: per copy a `SCAL`, a colour,
@@ -1690,9 +1690,10 @@ Wildbits MAME: the game and its sign-off.
 1. The line-engine holes (FPGA developer).
 2. `tline` for stage 1, when the core is fixed: above all the per-record cost.
 3. `SS.MsDelta` storage (5 bytes of vtio statics, 242 → 247 of 256), and its driver code.
-4. The frame rate of the split loop (14 a second in the model); the lost tick a game frame on the
-   K2 and the slow clock in MAME: the clear's wait for vertical blank, fixed and confirmed on the
-   K2, 15.4 game frames a second ("Optimising").
+4. The frame rate: settled for now. No split, the SOL clock catching up lost ticks, the well out
+   of the loop: K2 19.8 game frames a second (4,230 in 214 s, 5 dropped). Later levels still slow
+   a little as enemies are added; the ideas not taken: the well's colours through a CLUT instead
+   of a redraw, faster glyphs, tline S.
 5. The coprocessor divide's read-after-write timing, and its remainder, on hardware (D6 pilot,
    "Unchecked"; `DIVF` reads the remainder). Now also the multiplier's (`avg.a`, approved).
 6. The hardware half: the module itself can now be the first picture (`make install DSK=`, the
