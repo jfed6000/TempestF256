@@ -1601,6 +1601,13 @@ uses them the same way.
   was lost ticks), `tempnb` 586 with 733 line calls against 1,379. If `tempnb` feels as good, the
   budget trackers (`Spend`, `RECUS`, `WCBUS`, the batch sizing) can go, and their space with them.
 
+## Hardware: the SOL clock, `tempest` (user, 2026-09-24)
+
+`cb0ed48` `tempest` (the SOL clock, `BUDPAS` 12,600) on the K2: **2,882 game frames, 10,640 passes
+in 178 s: 16.2 game frames and 59.8 passes a second; 6,391 line calls (2.2 a game frame), 0 short,
+214 drawings dropped** (7% of game frames: the logo, or play's heaviest). Passes under 60 no
+longer mean lost time. `tempnb` not yet reported.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
