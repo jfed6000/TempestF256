@@ -1481,6 +1481,12 @@ a game frame, and none came back short** even with the 4,096 driver: no frame's 
 room, so **the 8,192 driver change (`c45760ab`, local) would gain nothing now**; it stays off the
 images and unpushed unless short returns appear.
 
+**`tempest w` on the same image** (the well run every frame): **2,524 game frames, 11,737 passes in
+196 s: 12.9 game frames and 59.9 passes a second; 7,256 line calls, 0 short.** Against `tempest`:
+**4.7 passes a game frame against 3.4, 2.9 line calls a game frame against 2.0**. The runs' lengths
+differ (196 s reaches heavier levels than 89 s), but a game frame is a tick shorter and a call
+lighter: **the well out of the loop is worth ~35-40% more game frames on the K2.**
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
