@@ -1545,6 +1545,32 @@ The model has always lost more ticks than the K2 (1.2% there, none on the hardwa
 bytes. On both disk images; the Wildbits MAME: the game and its sign-off (keyboard only there: the
 stick path waits for the K2). Two changes in one run, at the user's asking.
 
+## The attract baseline on the K2; the logo's drawings dropped (2026-09-24)
+
+**The attract benchmark on the K2** (`d975bb5`, the stick only when used, `BUDPAS` 12,600): **2
+minutes of attract (125 s by the sign-off): 1,780 game frames, 7,345 passes: 14.2 game frames and
+58.8 passes a second (~155 ticks lost, 2%); 4,572 line calls (2.6 a game frame), 0 short.** The
+baseline for later builds.
+
+**The logo** (user: "the Tempest marquee on the title screen draws really slow"): the zoom draws
+**19 copies of the logo** (its trail), six ROM pieces 19 times each, **646 records a drawing** for
+~10 s of the arcade's zoom; ~47 ms of interpreting alone, 5-6 passes a drawing, while its logic is
+one pass, and the game waits for each drawing. **A drawing that took `SKIPT` = 5 passes or more
+drops the next game frame's drawing** (its logic runs; the well's cache is forgotten, since the
+well may be rebuilt twice unseen). Play's drawings take 2-3 passes, so play is not touched. The
+user asked why the marquee is several `SS.BmLine` calls, not one: each call is a pass's worth
+(the budget), and the driver takes 255 records a call at most; one call would mean the whole
+logo interpreted first (~47 ms, three ticks without yielding), and the calls are ~3.6 ms of a
+~70 ms drawing. **`GFRAMS` now counts the game's frames** (its logic), drawn or dropped, and the
+sign-off's second line says the drawings dropped.
+
+`osrun.py`, 200 s of attract (no keys): **each logo zoom 1,081 ticks (18 s) before, 707 (11.8 s)
+now: 1.5x faster**, 55 drawings instead of 110; all of attract 12.5 -> 13.6 game frames a second;
+every check right. (The model's attract loses ~1,800 ticks in 200 s either way, against 2% on the
+K2: it charges the text screens more than the hardware costs.) The arcade's zoom is ~4 s:
+dropping two of three drawings when a drawing is very long would go further, choppier. Module
+39,851 bytes; on both disk images; the Wildbits MAME: the game and the new sign-off.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

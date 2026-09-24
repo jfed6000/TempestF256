@@ -30,6 +30,7 @@ VIRQD               equ       128
 BUDPAS              equ       12600               a drawing pass: the tick less the sleep, the IRQs, input (the stick only when used), SndOut and a margin
                     endc
                     endc
+SKIPT               equ       5                   a drawing this many passes long drops the next one
 BUDLOG              equ       0                   what a logic pass leaves for the drawing: nothing, since
 *                                                 the logic itself runs 9.7 to 12.6 ms (osrun.py)
                     ifne      BUDLOG
@@ -89,12 +90,27 @@ ml2                 lbsr      SndOut              the POKEY image onto the SIDs 
                     cmpa      #9
                     blo       MainLoop
                     lbsr      GamLog
-                    ldd       #BUDLOG
+                    ldd       GFRAMS,u            (the game's frames: its pace, drawn or not)
+                    addd      #1
+                    std       GFRAMS,u
+                    tst       SKIPNX,u            the last drawing ran long: this frame is not drawn
+                    beq       mld
+                    clr       SKIPNX,u
+                    ldd       DROPS,u
+                    addd      #1
+                    std       DROPS,u
+                    ifdef     AVWELL
+                    clr       AVGPG+AV.CVAL,u     (the well may be rebuilt twice unseen: its cache goes)
+                    endc
+                    lbra       MainLoop
+mld                 ldd       #BUDLOG
                     std       WORK,u
+                    ldd       PASSES,u
+                    std       DRWP0,u
                     lbsr      DrwBeg
-                    bra       MainLoop
+                    lbra       MainLoop
 ml3                 lbsr      DrwRes
-                    bra       MainLoop
+                    lbra       MainLoop
 
 ********************************************************************
 * GamLog - a game frame's logic: MAINLN's three calls.  The hidden line
@@ -130,9 +146,11 @@ DrwBeg              sts       MAINSP,u
                     inc       DRAWNG,u
                     bsr       Draw
                     clr       DRAWNG,u
-                    ldd       GFRAMS,u
-                    addd      #1
-                    std       GFRAMS,u
+                    ldd       PASSES,u            SKIPT passes or more: the next frame's drawing is
+                    subd      DRWP0,u             dropped, so the game keeps closer to its pace (the
+                    cmpd      #SKIPT              attract logo: 19 copies, ~5-6 passes a drawing)
+                    blo       DrwEnd
+                    inc       SKIPNX,u
 DrwEnd              lds       MAINSP,u            the frame is drawn (tools/osrun.py checks it here)
                     rts
 

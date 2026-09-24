@@ -370,8 +370,9 @@ ss1                 lda       #60
                     tfr       d,y
                     rts
 
-* Stats2 - "LLLLL line calls, KKKKK short": the SS.BmLine calls, and those
-*   the line FIFO's room cut short (gfx.a BmSend).  X = the line, Y its length.
+* Stats2 - "LLLLL line calls, KKKKK short, DDDDD dropped": the SS.BmLine
+*   calls, those the line FIFO's room cut short (gfx.a BmSend), and the
+*   drawings dropped behind a long one (frame.a).  X = the line, Y its length.
 Stats2              leay      STLINE,u
                     ldd       LNCALL,u
                     bsr       Dec5
@@ -380,6 +381,10 @@ Stats2              leay      STLINE,u
                     ldd       LNSHRT,u
                     bsr       Dec5
                     leax      StTx5,pcr
+                    bsr       StCpy
+                    ldd       DROPS,u
+                    bsr       Dec5
+                    leax      StTx6,pcr
                     bsr       StCpy
                     tfr       y,d
                     leax      STLINE,u
@@ -437,5 +442,7 @@ StTx3               fcc       / s/
                     fcb       $0D,$0A,0           (I$Write: a CR alone returns on the same row)
 StTx4               fcc       / line calls,/
                     fcb       0
-StTx5               fcc       / short/
+StTx5               fcc       / short,/
+                    fcb       0
+StTx6               fcc       / dropped/
                     fcb       $0D,0

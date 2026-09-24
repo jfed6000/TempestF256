@@ -106,7 +106,10 @@ DRWSP               rmb       2                   the drawing's S while the loop
 DRWSTL              equ       384                 the drawing's stack, its size
 DRWSTK              rmb       DRWSTL              the drawing's stack (frame.a)
 VACC                rmb       2                   the virtual IRQ's Bresenham accumulator (frame.a)
-GFRAMS              rmb       2                   game frames run
+GFRAMS              rmb       2                   game frames run (their logic; drawn or dropped)
+DROPS               rmb       2                   drawings dropped (the sign-off)
+DRWP0               rmb       2                   PASSES when this frame's drawing began
+SKIPNX              rmb       1                   non-zero: the next frame's drawing is dropped
 PAUSED              rmb       1                   non-zero = our terminal is a shadow (SS.WSig S$WinBg)
 SIGCODE             rmb       1                   abort/interrupt signal received (0 = none)
 
