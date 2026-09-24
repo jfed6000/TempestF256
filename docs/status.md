@@ -1526,6 +1526,25 @@ a second; 9,563 line calls, 0 short** (4.1 passes and 2.6 calls a game frame). B
 lengths reach different levels, so they cannot rank builds.** Proposed from now on: **an attract-mode
 benchmark** (start, no coin, 2 minutes, `q`), the same sequence every time, beside play for the feel.
 
+## The stick only when used; BUDPAS 12,600; RECUS stays (2026-09-24, host and MAME)
+
+User: "1 and 2" (the stick; re-tune `RECUS`). **`input.a`**: stick 0 (`SS.Joy`, ~400 µs a call)
+is read every pass only once it has shown a direction or a button (`JOYON`); until then, one look
+every `JOYLOOK` = 30 passes (half a second: a stick player's first push is noticed within that).
+`osrun.py`: GetStat calls 3,560 -> 1,825 in 30 s. **The time it frees goes to the drawing's budget:
+`BUDPAS` 12,300 -> 12,600.** The sweep (`osrun.py` 60 s each):
+
+| `BUDPAS` / `RECUS` | 12,300/150 | **12,600/150** | 12,300/140 | 12,600/140 | 12,300/130 | 12,600/130 |
+|---|---:|---:|---:|---:|---:|---:|
+| Game frames a second | 16.5 | **17.1** | 16.7 | 17.0 | 16.4 | 16.8 |
+| Ticks lost of 3,600 | 43 | **75** | 125 | 136 | 256 | 351 |
+
+**`RECUS` stays at 150**: lower only loses ticks now. With the well out of the loop the records
+left are the costly ones (dots, shapes, enemies), so 150 µs is about their real cost, not a margin.
+The model has always lost more ticks than the K2 (1.2% there, none on the hardware). Module 39,773
+bytes. On both disk images; the Wildbits MAME: the game and its sign-off (keyboard only there: the
+stick path waits for the K2). Two changes in one run, at the user's asking.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

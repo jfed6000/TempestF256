@@ -19,6 +19,7 @@ SS.MsDelta          equ       $D0                 approved (plan 6.1); not in th
 KEYRATE             equ       2                   encoder counts a tick while a key or the stick is held
 KNBMAX              equ       64                  counts owed at most, either way
 COINLEN             equ       8                   virtual IRQs the coin switch stays closed (32 ms)
+JOYLOOK             equ       30                  passes between looks at a stick not yet used
 KY.Shift            equ       %00000001           SS.LiveKeys sense bits (D.KySns)
 KY.Left             equ       %00100000
 KY.Right            equ       %01000000
@@ -81,14 +82,25 @@ in6                 decb
                     ldd       5,s
                     std       KBLAST+4,u
 inkx                leas      7,s
-* the stick
-                    lda       #0                  path 0
+* the stick: every pass once it has been used; before that, a look
+* every JOYLOOK passes (an SS.Joy call a pass is ~400 us of every tick)
+                    tst       JOYON,u
+                    bne       ij0
+                    dec       JOYCNT,u
+                    bpl       injx
+                    lda       #JOYLOOK-1
+                    sta       JOYCNT,u
+ij0                 lda       #0                  path 0
                     ldb       #SS.Joy
                     ldx       #JOY.Sticks         both sticks as bits; stick 0 is ours
                     os9       I$GetStt
                     bcs       injx                an older grfdrv256: no sticks
                     tfr       x,d
                     tfr       b,a
+                    tsta
+                    beq       injx                nothing pressed
+                    ldb       #1                  used: read it every pass from now on
+                    stb       JOYON,u
                     bita      #JY.Left
                     beq       ij1
                     ldb       ,s

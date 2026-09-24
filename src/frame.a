@@ -26,7 +26,9 @@ VIRQN               equ       525                 virtual IRQs a tick, times VIR
 VIRQD               equ       128
 * the budgets, in estimated microseconds (tools/osrun.py measures the passes they give)
                     ifndef    BUDPAS
-BUDPAS              equ       12300               a drawing pass: the tick less the sleep, the IRQs, input, SndOut (~150-650 us) and a margin
+                    ifndef    BUDPAS
+BUDPAS              equ       12600               a drawing pass: the tick less the sleep, the IRQs, input (the stick only when used), SndOut and a margin
+                    endc
                     endc
 BUDLOG              equ       0                   what a logic pass leaves for the drawing: nothing, since
 *                                                 the logic itself runs 9.7 to 12.6 ms (osrun.py)

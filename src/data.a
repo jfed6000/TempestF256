@@ -116,6 +116,8 @@ KNBPND              rmb       2                   counts not yet given to a virt
 BUTTNS              rmb       1                   ALLPO2's active-high buttons (zap, fire, starts)
 COINTM              rmb       1                   virtual IRQs the coin switch stays closed
 MOUSE               rmb       1                   non-zero: SS.MsDelta answers (counts mode set)
+JOYON               rmb       1                   non-zero: stick 0 has been used (read every pass)
+JOYCNT              rmb       1                   passes to the next look while it has not
 KBLAST              rmb       6                   last pass's held keys (new-press detection)
 QUITKEY             rmb       1                   Q was pressed
 EXITST              rmb       1                   exit status, for the sign-off
