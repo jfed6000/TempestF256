@@ -1662,6 +1662,21 @@ a logo frame (612 whole)**; the trail sparser, some colour bands gone, still a t
 `avgtest.py --logskip 2`: attract 2,801 frames exact, fuzz 1,000 clean. On both disk images; the
 Wildbits MAME: the game and its sign-off.
 
+## The logo's quiet end shortened (2026-09-24, host and MAME) — untested on hardware
+
+User: the final phase is slow "as the multiple tempests merge together"; "Can we do something about
+the quiet phase? The zoom looks good up to that point." Measured in the arcade capture: the zoom
+ends at video frame ~2121; then **the merge** (to ~2196, 1.25 s: the trail's copies vanish one
+every 2 game frames) and **a hold** (to ~2328, 2.2 s: the logo still). Atari's `LOGPRO` (ALSCO2):
+the front copy steps 1 a frame to its destination (`NEARY` below `$30`), the trail's end (`FARY`)
+1 a frame after it; the whole logo is `QTMPAUS` = 223 game frames (state `CPAUSE`, `PSCALE` 0: one
+a frame), so on the port it stretches with the frame rate. **The port's `LOGPRO`, with
+`LOGOQK` (set in `frame.a`, so the translation tests still build Atari's code)**: once the front
+has arrived, the trail closes `LOGMS` = 4 a frame; once merged, `QTMPAUS` is held to `LOGHD` = 27
+frames at most. The zoom itself is untouched. `osrun.py` (130 s of attract, the logo display
+state `$14`): **635 ticks (10.6 s) -> 475 (7.9 s)**. `xlattest.py --src -n 40` byte-exact. Module
+39,884 bytes; on both disk images; the Wildbits MAME: the game and its sign-off.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

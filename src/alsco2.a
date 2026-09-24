@@ -1629,7 +1629,16 @@ _ALSCO2_1111
 	bcc	_ALSCO2_1122			ALSCO2:1327 IFCC   ;NEAR PT. PAST PT. WHERE FAR PT. MOVES? ;brALSCO2:1327:535
 	lda	FARY,u			ALSCO2:1328 LDA FARY  ;YES. BRING FAR PT. CLOSER
 *					ALSCO2:1329 SEC
+	ifdef	LOGOQK
+	ldb	NEARY,u			PORT (frame.a LOGOQK): the front arrived (NEARY below $30),
+	cmpb	#$30			the trail closes LOGMS a frame, not 1: the merge brisk
+	bhs	_LOGQ1
+	suba	#LOGMS
+	bra	_LOGQ2
+_LOGQ1
+	endc
 	suba	#$01			ALSCO2:1330 SBC I,1
+_LOGQ2
 	cmpa	NEARY,u			ALSCO2:1331 CMP NEARY
 	bcc	_ALSCO2_1120			ALSCO2:1332 IFCC   ;FAR PT PAST NEAR? ;brALSCO2:1332:536
 	lda	NEARY,u			ALSCO2:1333 LDA NEARY  ;YES. SET AT NEAR PT
@@ -1637,6 +1646,18 @@ _ALSCO2_1120
 *					ALSCO2:1334 ENDIF
 	pshs	cc				the store must keep N, Z
 	sta	FARY,u			ALSCO2:1335 STA FARY
+	ifdef	LOGOQK
+	cmpa	NEARY,u			PORT: merged, the front arrived: the logo's pause
+	bne	_LOGQ3			(QTMPAUS, 223 game frames for the whole logo) holds
+	cmpa	#$30			LOGHD frames at most from here
+	bhs	_LOGQ3
+	lda	<QTMPAU
+	cmpa	#LOGHD
+	bls	_LOGQ3
+	lda	#LOGHD
+	sta	<QTMPAU
+_LOGQ3
+	endc
 	puls	cc
 _ALSCO2_1122
 *					ALSCO2:1336 ENDIF
