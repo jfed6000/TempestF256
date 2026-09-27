@@ -16,7 +16,7 @@ READ FIRST:
   - docs/port-guide.md (generic platform guide) and, from ~/projects/wild/joust/docs, only as needed:
     grfdrv256-api.md, bitmap-api.md, driver-performance.md.
 
-WHERE THINGS STAND (2026-09-27; docs/status.md from "Hardware: the collapse and BmWait build works"
+WHERE THINGS STAND (2026-09-27, end of session; docs/status.md from "Hardware: the collapse and BmWait build works"
 on has every step, each marked confirmed or untested):
   - main (ff90-sound merged in 2026-09-27; ff90-sound kept). 640x240 HIRES4 planes. The K2 now
     runs the 6809 at 12 MHz: 26.9 game frames a second (2,524 in 94 s, 3 dropped; the arcade's
@@ -31,11 +31,13 @@ on has every step, each marked confirmed or untested):
     (confirmed in play) and reversed back in the rating ladder and initials (KnbRev, QSTATE
     $12/$16; the ladder confirmed by host trace only). The sign-off gained ticks, pauses and a line
     a game (frames, ticks, passes: platform.a GamStat), kept by the user. Module 40,187 of 40,192
-    bytes: 5 free.
-  - OPEN: a slowdown within one run (game 2 or 4 once each: frames to 11.6 a second with ticks at
-    59.4, sound lost; restart fixes it), then 8 clean games in 16 minutes on the diagnostic build.
-    Not SOL, not the tick wrap, not seen in the host model. docs/status.md "The slowdown after a
-    few games" has every step.
+    bytes.
+  - The slowdown within a run (game 2 or 4: 11.6 frames a second, restart fixed it) was FOUND on the
+    host and fixed in 57fd80d: gfx.a bcgo latched NODMA on SS.BmClear's E$DevBsy (a fill still
+    outstanding after two logic passes in one frame, a dropped drawing between, allowed by the FRTIMR
+    carry), so the CPU cleared 80K every frame. Busy is now success. Host replay 8.0 -> 23.0; NOT YET
+    RUN ON THE K2 (check every game line of the sign-off stays ~27, and the sound). docs/status.md
+    "The slowdown found". Module 40,191 of 40,192 bytes: 1 free.
   - Before that, in order: small shapes collapsed to dots (AVCOLL), BmWait gone, sound on the two
     SIDs (POKEY image), layers (0 tile map off, 1 lines, 2 text and the well), the well
     cached and skipped while its SWWELL word and colour hold (AVWELL), the 8,192-entry line FIFO,
