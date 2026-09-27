@@ -209,7 +209,11 @@ abok                leas      1,s
 *   on the DMA engine, one call that returns with the bitmap clear (wait
 *   mode 7, 16-bit; it needs the fixed core, docs/port-tempest.md
 *   4.2); if that ever fails, NODMA latches and the CPU clears through
-*   the service window from then on, as Joust does.
+*   the service window from then on, as Joust does.  Not on E$DevBsy:
+*   a fill still outstanding is the one BmArm armed a pass ago, on the
+*   same bitmap - two logic passes with a dropped drawing between them,
+*   the second inside the first's frame.  Latching on it made every
+*   frame after clear 80K by CPU (the slowdown within a run).
 *   Exit: carry = error in B.  U kept.
 ********************************************************************
 BmClr               ldb       #DmaWt.Poll<<DmaWt.Shift+1 poll until done, 16-bit
@@ -236,6 +240,8 @@ bcgo                tst       NODMA,u
                     os9       I$SetStt
                     puls      a,u
                     bcc       bcok
+                    cmpb      #E$DevBsy           a fill still outstanding: the one armed a pass
+                    beq       bcok                ago, on this same bitmap (no flip between; status.md)
                     inc       NODMA,u
 BmClrCPU            leax      BMBLKS,u
                     lda       a,x                 the first block

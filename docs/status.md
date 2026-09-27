@@ -1906,6 +1906,39 @@ clear has run" once, after a long caught-up pass (the logic can now run mid-tick
 waits for the next line 0, and the drawing takes the next signal). On the K2 the fill halts the CPU,
 so the drawing can't start before it; whether it predates the FRTIMR carry is not yet checked.
 
+## The slowdown found: NODMA latched on E$DevBsy (2026-09-27, host) — the fix untested on hardware
+
+**Reproduced on the host.** A scratch harness (games back to back, coin and start in attract, the
+high-score table zeroed so every game enters initials, and a check for stores from the game code
+outside its RAM) ran game 1 at 23.1 game frames a second (the 8 MHz model) and **game 2 at 8.0**. No
+stray stores but the known EAROM spill (`alearo.a` to `$0925`-`$0929`, past the last shadow: harmless).
+A profile by routine, every 10 s: game 1 spread over the interpreter; game 2 **57-71% in `bc2`**, the
+loop of **`gfx.a` `BmClrCPU`**, the CPU's clear of the 80K line bitmap.
+
+**The cause.** `bcgo` (BmArm, BmClr) latched `NODMA` on any `SS.BmClear` error, after which every
+frame's clear is the CPU's, for the rest of the run (restarting clears the data area: why a restart
+fixed it). The only caller in play is `GamLog`'s `BmArm`, which arms the hidden bitmap's fill for the
+next vertical blank (at once if armed inside lines 0-41). grfdrv256 answers **`E$DevBsy` when a fill
+is still outstanding** (`DMA_STATUS_REG` bit 7). The replay's moment (tick 6198, state `$16`, the
+start ladder of game 2): a drawing took ~15 ticks, so the next is dropped (`SKIPNX`); the logic pass
+after it catches up 14 ticks (`FRTIMR` 65, carried as 4) and arms at **line 233** (the fill waits for
+the next blank); with no drawing between, one tick's IRQs make `FRTIMR` 9 and **a second logic pass
+arms at line 357 of the same frame** -> `E$DevBsy` -> `NODMA`. **Introduced by the FRTIMR carry**
+(section "12 MHz"): cleared to 0, the second logic pass could not come for two more ticks.
+
+**The fix (`gfx.a` `bcgo`):** `E$DevBsy` is not a dead engine but the fill armed a pass ago, **on the
+same bitmap** (nothing flips between two logic passes with a dropped drawing between them), so it is
+taken as success; any other error still latches `NODMA`. 4 bytes: **module 40,191 of 40,192**. (A core
+without the DMA fix, whose busy bit never clears, would now go uncleared rather than fall back to the
+CPU; the port already requires the fixed core.)
+
+**Checked:** the same replay with the fix: game 1 identical (2,180 frames in 5,658 ticks); **game 2
+23.0 game frames a second** (1,528 in 3,978 ticks; 8.0 before), `bc2` gone from the profile, `NODMA`
+0. `osrun.py` 85 s: the checks right but for "SS.BmLine into bitmap 1 before its clear has run",
+once: the drawing after such a double logic pass starts on the same line-0 signal as the pending
+fill, and the model lets it; on the K2 the fill halts the CPU for its 384 µs, so it can't. The
+Wildbits MAME: the game, 1,216 game frames in 45 s, the sign-off. On both disk images.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).
