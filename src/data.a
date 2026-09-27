@@ -116,6 +116,9 @@ COINTM              rmb       1                   virtual IRQs the coin switch s
 MOUSE               rmb       1                   non-zero: SS.MsDelta answers (counts mode set)
 JOYON               rmb       1                   non-zero: stick 0 has been used (read every pass)
 JOYCNT              rmb       1                   passes to the next look while it has not
+PADST               rmb       1                   SNES pad 0: 0 not read, 1 read, 2 seen at rest (input.a)
+PADON               rmb       1                   non-zero: it has been used (read every pass)
+PADCNT              rmb       1                   passes to the next look while it has not
 KBLAST              rmb       6                   last pass's held keys (new-press detection)
 QUITKEY             rmb       1                   Q was pressed
 EXITST              rmb       1                   exit status, for the sign-off

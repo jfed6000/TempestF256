@@ -79,6 +79,7 @@ class Host(CPU6809):
         super().__init__()
         self.sym = sym
         self.mem[MODBASE:MODBASE + len(module)] = module
+        self.padread = False                # SS.Joy JOY.SNES2 has been called (tools --pad)
         self.blocks = {}                        # physical block -> bytearray(8192)
         self.mapped = {}                        # logical base -> block
         self.next_ram = 0x40
@@ -370,7 +371,12 @@ class Host(CPU6809):
             self.x, self.y, self.u = k[0] << 8 | k[1], k[2] << 8 | k[3], k[4] << 8 | k[5]
             return 0
         if code == SS_JOY and get:
+            mode = self.x
             self.x = self.y = 0
+            if mode == JOY_SNES2 and PAD_MODE:
+                if self.padread:            # the driver: the first reading after the port is set is empty
+                    self.x = pad(self.tick)
+                self.padread = True
             return 0
         if code == SS_MSDELTA:
             return E_UNKSVC                 # the driver does not have it yet
@@ -649,6 +655,8 @@ KY_SHIFT, KY_LEFT, KY_RIGHT = 0x01, 0x20, 0x40
 
 
 QUIT_AT = None      # --quit S: press q at S seconds
+PAD_MODE = None     # --pad snes|held|nes: SNES pad 0 plays instead of the keys (input.a)
+JOY_SNES2 = 4
 
 
 def script(tick):
@@ -660,7 +668,7 @@ def script(tick):
         keys.append(ord("5"))
     if 180 <= tick < 190:
         keys.append(ord("1"))
-    if tick >= 240:
+    if tick >= 240 and not PAD_MODE:
         if (tick // 8) % 2:
             sense |= KY_SHIFT
         phase = (tick // 90) % 3
@@ -670,6 +678,24 @@ def script(tick):
     return sense, keys
 
 
+def pad(tick):
+    """SNES pad 0's JY word: after the start, B (fire) on and off, the d-pad by turns, A (zap) every
+    1,500 ticks.  held: a port whose lines read held with no pad.  nes: an NES pad read as SNES (its
+    missing A, X, L and R held).  Neither of those two may ever be taken."""
+    w = 0
+    if tick >= 240:
+        if (tick // 8) % 2:
+            w |= 0x10
+        w |= (0x04, 0, 0x08)[(tick // 90) % 3]
+        if 1000 <= tick % 1500 < 1010:
+            w |= 0x40
+    if PAD_MODE == "held":
+        w = 0x0FFF
+    elif PAD_MODE == "nes":
+        w |= 0x0CC0
+    return w
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seconds", type=float, default=30)
@@ -677,9 +703,11 @@ def main():
     ap.add_argument("--every", type=int, default=100, help="with --png, every n-th game frame")
     ap.add_argument("--passes", action="store_true", help="break the passes down")
     ap.add_argument("--quit", type=float, help="press q at this many seconds; print the sign-off")
+    ap.add_argument("--pad", choices=("snes", "held", "nes"), help="SNES pad 0 plays instead of the keys")
     a = ap.parse_args()
-    global QUIT_AT
+    global QUIT_AT, PAD_MODE
     QUIT_AT = a.quit
+    PAD_MODE = a.pad
     module = open(os.path.join(SRC, "tempest"), "rb").read()
     sym = symbols()
     h = Host(module, sym, script)
@@ -692,7 +720,7 @@ def main():
     gamlog = MODBASE + sym["GamLog"]
     drwend = MODBASE + sym["DrwEnd"]
     irq = MODBASE + sym["IRQ"]
-    nirq = 0
+    nirq = zaps = fires = 0
     start = None
     logret = None
     txdraw = MODBASE + sym["TxDraw"]
@@ -704,6 +732,9 @@ def main():
             pc = h.pc
             if pc == irq:
                 nirq += 1
+                b = h.mem[DATA + sym["HW_60D8"]]
+                zaps += bool(b & 0x08)
+                fires += bool(b & 0x10)
             elif pc == gamlog:
                 start = h.cycles
                 h.pass_logic = True
@@ -725,7 +756,8 @@ def main():
             status += "; it wrote %r" % h.output
     secs = max(h.cycles / HZ, 1e-9)
     print(status)
-    print("virtual IRQs %d (%.1f a second; the arcade's 246.1)" % (nirq, nirq / secs))
+    print("virtual IRQs %d (%.1f a second; the arcade's 246.1); zap held in %d, fire in %d" % (
+        nirq, nirq / secs, zaps, fires))
     print("ticks %d, game frames %d (%.1f a second), os9 calls %s" % (
         h.tick, len(frames), len(frames) / secs,
         ", ".join("$%02X x%d" % kv for kv in sorted(h.calls.items()))))

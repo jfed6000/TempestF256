@@ -7,12 +7,16 @@
 *   tick, Shift fires, z is the superzapper (lower case: the driver's
 *   codes are unshifted), 1 and 2 are the start buttons, 5 drops a coin,
 *   q quits.  Joystick 0 (SS.Joy JOY.Sticks): left and right at the same
-*   rate, button 0 fires, button 2 zaps.  Mouse (SS.MsDelta $D0, when
+*   rate, button 0 fires, button 2 zaps (the K2's core ties buttons 1 and
+*   2 open, docs/status.md).  SNES pad 0 (SS.Joy JOY.SNES2): the same, its
+*   low byte being stick-compatible: B fires, A zaps.  Mouse (SS.MsDelta $D0, when
 *   the driver has it): X motion, one count a count; left button fires,
 *   right zaps.  All of them together.
 *
-*   The rate and the direction are first guesses, for tuning by feel
-*   against MAME (the settings file, stage 7f).
+*   The direction (user, 2026-09-27): right turns the claw counter-
+*   clockwise, so it moves right along the flat wells' rim at the bottom
+*   (the first guess was backwards there), and the other way round in
+*   the rating ladder and the initials (KnbRev).  The rate: KEYRATE 4.
 ********************************************************************
 
 SS.MsDelta          equ       $D0                 approved (plan 6.1); not in the driver yet
@@ -46,11 +50,11 @@ InFram              pshs      b                   ,s = ticks
                     bita      #KY.Left
                     beq       in1
                     ldb       7,s
-                    lbsr      KnbDn
+                    lbsr      KnbUp
 in1                 bita      #KY.Right
                     beq       in2
                     ldb       7,s
-                    lbsr      KnbUp
+                    lbsr      KnbDn
 in2                 bita      #KY.Shift
                     beq       in3
                     ldb       #BT.Fire
@@ -96,28 +100,48 @@ ij0                 lda       #0                  path 0
                     os9       I$GetStt
                     bcs       injx                an older grfdrv256: no sticks
                     tfr       x,d
-                    tfr       b,a
-                    tsta
+                    tstb
                     beq       injx                nothing pressed
-                    ldb       #1                  used: read it every pass from now on
-                    stb       JOYON,u
-                    bita      #JY.Left
-                    beq       ij1
-                    ldb       ,s
-                    bsr       KnbDn
-ij1                 bita      #JY.Right
-                    beq       ij2
-                    ldb       ,s
-                    bsr       KnbUp
-ij2                 bita      #JY.Btn0
-                    beq       ij3
-                    ldb       #BT.Fire
-                    bsr       BtnOn
-ij3                 bita      #JY.Btn2
-                    beq       injx
-                    ldb       #BT.Zap
-                    bsr       BtnOn
+                    lda       #1                  used: read it every pass from now on
+                    sta       JOYON,u
+                    tfr       b,a
+                    ldb       ,s                  the ticks
+                    bsr       JoyA
 injx
+* SNES pad 0, looked at the same way.  The port can't tell whether a pad
+* is plugged in, and its first reading is empty, so PADST: the first
+* reading is skipped (0 -> 1), then the pad must read all zero, at rest,
+* once (1 -> 2) before its buttons count.  A port that reads held with
+* no pad, or an NES pad (its missing A X L R read held), is never taken.
+                    tst       PADON,u
+                    bne       ip0
+                    dec       PADCNT,u
+                    bpl       ipx
+                    lda       #JOYLOOK-1
+                    sta       PADCNT,u
+ip0                 lda       #0                  path 0
+                    ldb       #SS.Joy
+                    ldx       #JOY.SNES2          SNES pads 0 and 1: X = pad 0
+                    os9       I$GetStt
+                    bcs       ipx                 an older grfdrv256: no pads
+                    ldb       PADST,u
+                    cmpb      #2
+                    beq       ip2
+                    tstb
+                    beq       ip1                 the first reading: empty whatever is held
+                    cmpx      #0
+                    bne       ipx                 held with nothing seen at rest: not yet
+ip1                 inc       PADST,u
+                    bra       ipx
+ip2                 cmpx      #0
+                    beq       ipx                 nothing pressed
+                    lda       #1                  used: read it every pass from now on
+                    sta       PADON,u
+                    tfr       x,d
+                    tfr       b,a                 the low byte, as a stick's
+                    ldb       ,s                  the ticks
+                    bsr       JoyA
+ipx
 * the mouse
                     tst       MOUSE,u
                     beq       inx
@@ -138,25 +162,66 @@ im2                 tfr       x,d
                     bsr       KnbSet
 inx                 puls      b,pc
 
+* JoyA - A = a stick's JY bits, or a pad's low byte; B = the ticks.  Left
+*   and right turn at KEYRATE a tick, button 0 fires, button 2 zaps.
+JoyA                pshs      b                   ,s = ticks
+                    bita      #JY.Left
+                    beq       ja1
+                    ldb       ,s
+                    bsr       KnbUp
+ja1                 bita      #JY.Right
+                    beq       ja2
+                    ldb       ,s
+                    bsr       KnbDn
+ja2                 bita      #JY.Btn0
+                    beq       ja3
+                    ldb       #BT.Fire
+                    bsr       BtnOn
+ja3                 bita      #JY.Btn2
+                    beq       ja4
+                    ldb       #BT.Zap
+                    bsr       BtnOn
+ja4                 puls      b,pc
+
 * BtnOn - B = an ALLPO2 bit: pressed.  A kept.
 BtnOn               orb       BUTTNS,u
                     stb       BUTTNS,u
                     rts
 
-* KnbUp / KnbDn - B = ticks: KEYRATE counts a tick one way or the other.  A kept.
+* KnbUp / KnbDn - B = ticks: KEYRATE counts a tick one way or the other,
+*   the other way round in the menus (KnbRev).  A kept.
 KnbUp               pshs      a
-                    lda       #KEYRATE
+                    bsr       KnbRev
+                    bne       kd1                 a menu: down
+ku1                 lda       #KEYRATE
                     mul
                     addd      KNBPND,u
                     bra       kn1
 KnbDn               pshs      a
-                    lda       #KEYRATE
+                    bsr       KnbRev
+                    bne       ku1                 a menu: up
+kd1                 lda       #KEYRATE
                     mul
                     pshs      d
                     ldd       KNBPND,u
                     subd      ,s++
 kn1                 bsr       KnbSet
                     puls      a,pc
+
+* KnbRev - NE in the menus.  There the game reads the counts through
+*   GINICO, + for the next initial or rating (on screen, to the right):
+*   the high score initials (GETINI, state $12) and the rating ladder
+*   (PRORAT, $16).  Elsewhere + turns the claw clockwise, and the keys
+*   are the other way round (right = counterclockwise).  A clobbered.
+KnbRev              lda       <QSTATE
+                    cmpa      #$12                GETINI (ALEXEC:94)
+                    beq       kr1
+                    cmpa      #$16                PRORAT (ALEXEC:96)
+                    beq       kr1
+                    clra                          EQ: the claw
+                    rts
+kr1                 lda       #1                  NE: a menu
+                    rts
 
 * KnbSet - KNBPND = D, held to +-KNBMAX.  A, B clobbered.
 KnbSet              cmpd      #KNBMAX
