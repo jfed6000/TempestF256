@@ -15,7 +15,8 @@ withdrawn): the game's clock keeps time, at 14 game frames a second in the model
 
 - **D1 revision:** Rev 3 ("2A(alt)").
 - **D4 controls (user):** no spinner. Keyboard (← → constant rate, Shift fire, `z` superzapper),
-  mouse (proportional, via `SS.MsDelta`), joystick (constant rate, buttons 0/1).
+  mouse (proportional, via `SS.MsDelta`), joystick (constant rate, button 0 fire, button 2 zap:
+  user 2026-09-27; was button 1).
 - **D8 (user):** the math coprocessor at `$FEE0` is approved.
 - **`SS.MsDelta` $D0 (user):** layout approved (plan 6.1). Not coded.
 - **D6 register model (user, 2026-09-22): model B** — 6502 X and Y in the zero-page
@@ -1691,6 +1692,99 @@ User: on quitting, "some sort of ending line or closing quip". After the sign-of
 any clean quit, even before the loop ran), `ExitMsg` (`platform.a`) prints Prospero's **"Our revels
 now are ended."** (*The Tempest*, 4.1); not after an error. Module 39,928 bytes; on both disk
 images; the Wildbits MAME: the sign-off, the line, then the shell's prompt.
+
+## The SIDs in the $FF90 sound block (branch ff90-sound, 2026-09-24, host and MAME) — untested on hardware
+
+The new core moves the sound registers from I/O block $C4 into the fixed I/O page: $FF91-$FF93 the
+PSG (left, both, right), $FF94-$FF97 the OPL3's two banks (address, data), **$FF98 the SID selector**
+(the target, left/right/both, plus a five-bit register number) and **$FF99 the SID data**. The game
+uses only the SIDs. `sound.a`: SidOn/SidOff (the MMU slot write with interrupts masked) are gone;
+`SidW` writes B to $FF98, then A to $FF99; `SidVoc` picks a voice's selector base (SNDSEL, which
+replaces SNDBAS; SNDCC, SNDF0, SNDSL, SNDOB removed); SndInit and SndExit write the "both" target, so
+it takes one write to reach both SIDs. No interrupt mask around the pair (nothing else writes the
+SIDs). The MMU is no longer touched: piccheck's $FFA0-$FFAF exception is replaced by $FF98-$FF99.
+
+The selector, from the core's documentation (2026-09-24): bit 7 ignored (reads 0); **bits 6-5 the
+target: 00 left, 01 right, 10 both, 11 disabled**; bits 4-0 the register. It reads back and persists
+between data writes (reset $00: left, register 0); $FF99 is write only (reads $FF). So `SIDL $00`,
+`SIDR $20`, `SIDB $40` (a first guess had right and both swapped; fixed before any hardware run).
+They sit in three equates at the top of `sound.a`, mirrored in `tools/sndtest.py`. Host:
+`sndtest.py` (tsnd sequence, 45 s) 0 wrong; `sndtest.py --game --seconds 60` 0 wrong; `osrun.py
+--seconds 60` 20.2 game frames a second, checks clean. Module 39,834 bytes; on both disk images. The
+Wildbits MAME (no $FF98 SIDs, so silent there): the game, a coin, start, q, the sign-off.
+
+## Hardware: 12 MHz (user, 2026-09-27); the frame gate's lost IRQs carried — confirmed on the K2
+
+**The K2 at 12 MHz** (the `ff90-sound` build): **4,064 game frames, 11,512 passes in 218 s: 18.6
+game frames a second; 4,786 line calls (1.18 a game frame), 0 short, 3 dropped.** Against 19.8 at
+8 MHz: nothing gained. User: "Thought it would be better." Sound not yet reported.
+
+**Why: the frame gate, not the CPU.** A game frame's logic runs once `FRTIMR` holds 9 virtual IRQs
+(the arcade's MAINLN rule), and `GamLog` cleared it to 0 (ALEXEC:53). The arcade polls `FRTIMR` all
+the time, so it clears ~0 surplus and runs 27.1 frames a second. The port only looks at a pass, at a
+tick, and a tick adds 4.1: logic at tick 0, the drawing at tick 1, **~8 IRQs at tick 2, so the logic
+waits for tick 3**, and the up to 4 past 9 are thrown away. So **~3 ticks a game frame, 20 a second,
+however fast the passes**. `osrun.py` with its clock made a parameter (a scratch copy: `HZ` and the
+os9 call costs, which were `us * 8`): 8 MHz 20.2, 12 MHz 20.7, 12 MHz with the driver's calls 2/3 as
+long 20.9, although the median pass fell 16.4 -> 11.1 ms and ticks lost 1,563 -> 328.
+
+**The change (`frame.a` `GamLog`):** `FRTIMR` -= 9 instead of cleared, the rest kept up to `FRCARY` = 4
+(the most a frame can hold past 9 when it runs at the first tick it may: <= 8, plus <= 5 a tick), so
+a late frame is not caught up by running two close together, and ALDIS2:572's `$7A` is harmless. The
+game logic is untouched (the gate is port code). Model, 60 s:
+
+| | 8 MHz | 12 MHz | 12 MHz, calls 2/3 |
+|---|---:|---:|---:|
+| Before | 20.2 | 20.7 | 20.9 |
+| **FRTIMR carried** | **21.4** | **26.0** | **26.6** |
+
+(the arcade's is 27.1, the ceiling). Virtual IRQs 245.7 a second in all; every check right. The
+Wildbits MAME (no line engine; fast): **1,306 game frames in 48 s, 27.2 a second** (before: 589 in
+29 s, 20.3), 4 dropped, the sign-off, the prompt. Module 39,844 bytes; on both disk images. The game
+itself now runs nearer the arcade's speed (at 20 frames a second it ran at 74% of it: enemies,
+timers and the logo in slow motion), so expect it to feel faster, not only smoother.
+
+**On the K2 at 12 MHz (user, 2026-09-27): 2,524 game frames, 5,478 passes in 94 s: 26.9 game
+frames a second** (the arcade's 27.1; 18.6 before the change) and 58.3 passes a second; **3,082 line
+calls (1.22 a game frame), 0 short, 3 dropped.** The model's 26.0-26.6 was a little low. Sound
+through $FF98/$FF99 not yet reported.
+
+**Sound through $FF98/$FF99 works on the K2 (user, 2026-09-27): "Sound works."** That confirms the
+section above.
+
+## KEYRATE 3, then 4 (2026-09-27) — 4 confirmed on the K2
+
+User: "We may want to up the speed a bit on the spinner with the keyboard. The game is moving a
+little faster." The keys (and the stick) add `KEYRATE` counts a tick, a rate in real time: 2 = 120
+counts a second, ~7.5 segments (16 counts each) a second, the same before and after the FRTIMR fix.
+Only the game around the claw got faster (74% of the arcade's pace -> 99%). **`input.a` `KEYRATE`
+2 -> 3** (user: "Up the keyrate to 3"): 180 a second, ~11 segments, once round a 16-lane well in
+~1.4 s. `MOVCUR` takes up to 31 counts a frame, so there's plenty of headroom. If 3 overshoots: half-counts
+(2.5); or acceleration (2 rising to 4-5 while held), which would change D4's "constant rate".
+`osrun.py` 30 s: checks right; the Wildbits MAME: 1,241 game frames in 48 s, the sign-off. Module
+39,844 bytes; on both disk images.
+
+**Then `KEYRATE` 4** (user, after running 3 on the K2: "I think we can try 4"): 240 counts a second,
+~15 segments a second, once round a 16-lane well in ~1.1 s (2x the old rate). `osrun.py` 30 s: checks
+right; the Wildbits MAME: 1,286 game frames in 48 s, the sign-off. On both disk images; untested on
+hardware.
+
+**K2 (user, 2026-09-27): "Keyrate 4 is pretty good. almost tempted to try 5. But I think we should
+stick with 4."** `KEYRATE` 4 stays.
+
+## The superzapper on joystick button 2 (2026-09-27, host and MAME) — untested on hardware
+
+User: "can we make the superzapper button 2 on the joystick?" `input.a`: `JY.Btn1` -> `JY.Btn2`
+(`%01000000`, defs/wildbits.d: stick button 2; SNES A). Button 0 still fires; button 1 now does
+nothing. D4's table (port-plan) updated. Built with `KEYRATE` 4 (not yet reported from the K2), so
+this run changes two things, which is fine since they don't touch each other. `osrun.py` 30 s: checks
+right; the Wildbits MAME: 1,218 game frames in 45 s, the sign-off. On both disk images.
+
+**K2 (user, 2026-09-27): button 2 also fired.** The code is right: grfdrv256 hands on the VIA's bits
+unchanged (bit 4 button 0 = DB9 pin 6, bit 5 button 1, bit 6 button 2). **The user's stick wires
+both its buttons together to pin 6**, as many Atari-style sticks do, so it can't have a separate zap.
+User: "Time to get a new stick." Not tested with a stick that has a real second button. `joyview`
+(on the image) shows which bit a button sets.
 
 ## Open items
 

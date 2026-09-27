@@ -5,7 +5,7 @@ Paste the block below to start the next session, from ~/projects/wild/tempest.
 ```
 We're porting Atari's arcade TEMPEST (Rev 3, the source's "2A(alt)") to NitrOS-9 Level 2 on the
 Wildbits F256 (6809, rc16 FPGA core, K2 and Jr2). Joust, the first game on this platform, is finished in
-~/projects/wild/joust. This folder is a git repo (main and hires640), remote origin https://github.com/jfed6000/TempestF256 (public).
+~/projects/wild/joust. This folder is a git repo (main, hires640, ff90-sound), remote origin https://github.com/jfed6000/TempestF256 (public).
 
 READ FIRST:
   - docs/status.md: state, decisions, hardware findings, stage 0's numbers. Start here.
@@ -16,13 +16,17 @@ READ FIRST:
   - docs/port-guide.md (generic platform guide) and, from ~/projects/wild/joust/docs, only as needed:
     grfdrv256-api.md, bitmap-api.md, driver-performance.md.
 
-WHERE THINGS STAND (2026-09-24, end of the performance session; docs/status.md from "Hardware:
-the collapse and BmWait build works" on has every step, each marked confirmed or untested):
-  - main (5aeffe8, hires640 merged in 2026-09-24; hires640 kept, at the same commit). 640x240
-    HIRES4 planes. K2: 19.8 game frames a second (4,230 in 214 s, 5 dropped), up from 13.0.
-    In order: small shapes collapsed to dots (AVCOLL), BmWait gone, sound on the two SIDs
-    (POKEY image; the SIDs reached by a direct MMU slot write, interrupts masked: SidOn/SidOff,
-    an approved exception), layers (0 tile map off, 1 lines, 2 text and the well), the well
+WHERE THINGS STAND (2026-09-27; docs/status.md from "Hardware: the collapse and BmWait build works"
+on has every step, each marked confirmed or untested):
+  - main (ff90-sound merged in 2026-09-27; ff90-sound kept). 640x240 HIRES4 planes. The K2 now
+    runs the 6809 at 12 MHz: 26.9 game frames a second (2,524 in 94 s, 3 dropped; the arcade's
+    27.1), up from 19.8 at 8 MHz. The ff90-sound merge brought: the SIDs through the new core's
+    $FF90 sound block ($FF98 selector, $FF99 data; SidOn/SidOff and the MMU exception gone), the
+    frame gate's IRQs past 9 carried (frame.a GamLog, FRCARY 4: before, frames took 3 ticks, a
+    20-a-second cap whatever the CPU), KEYRATE 4 (keys and stick), all confirmed on the K2; and the
+    superzapper on stick button 2 (JY.Btn2), untested: the user's stick wires both buttons to fire.
+  - Before that, in order: small shapes collapsed to dots (AVCOLL), BmWait gone, sound on the two
+    SIDs (POKEY image), layers (0 tile map off, 1 lines, 2 text and the well), the well
     cached and skipped while its SWWELL word and colour hold (AVWELL), the 8,192-entry line FIFO,
     the stick read only when used, the SOL clock (/fSOL line-0 signal counts ticks, passes catch
     up lost ticks, muted in pause), no split (a game frame = a logic pass + a whole drawing; the
@@ -36,9 +40,9 @@ NEXT SESSION: my call. Open items: docs/status.md "Open items".
 
 GROUND RULES (from Joust, all still in force): Level 2 only. Position-independent code, OS-9 program
 modules, data through DP/U; a "make pic" check like Joust's tools/piccheck.py. No direct MMU access from
-programs (F$MapBlk and F$ClrBlk only) except SidOn/SidOff's slot write (approved 2026-09-23). The
+programs (F$MapBlk and F$ClrBlk only; SidOn/SidOff's exception retired 2026-09-24). The
 approved absolute I/O addresses are the VS1053 at $FF50-$FF57, the math coprocessor at $FEE0-$FEFF
-(D8) and the MMU at $FFA0-$FFAF (tools/piccheck.py knows all three). Addresses come from the rc16 memory map, https://nitrobotics.github.io/Wildbits/ and, above
+(D8) and the SIDs' selector and data at $FF98-$FF99 (tools/piccheck.py knows all three). Addresses come from the rc16 memory map, https://nitrobotics.github.io/Wildbits/ and, above
 both, the FPGA source in ~/projects/wild/joust/fpga-6809-cores-staging/, a READ-ONLY clone: never modify,
 commit or push anything inside it (it does not have the DMA fix yet). Propose new SS call layouts, and
 any change to an existing one, for my review before coding. DON'T MODIFY MAME, either copy.
