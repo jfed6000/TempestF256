@@ -96,6 +96,7 @@ ml2                 lbsr      SndOut              the POKEY image onto the SIDs 
                     cmpa      #9
                     lblo      MainLoop
                     lbsr      GamLog
+                    lbsr      GamStat             (the sign-off's line a game: platform.a)
                     ldd       GFRAMS,u            (the game's frames: its pace, drawn or not)
                     addd      #1
                     std       GFRAMS,u

@@ -184,7 +184,10 @@ cu1                 lbsr      ExitMsg             clear the screen and sign off
 *   away is not owed as virtual IRQs: the game stood still.  A frame's
 *   drawing that was under way goes on where it stopped.
 ********************************************************************
-PausWt              lbsr      SndExit             silent while hidden (SndInit again on the way back)
+PausWt              ldd       PAUSES,u            (the sign-off counts them)
+                    addd      #1
+                    std       PAUSES,u
+                    lbsr      SndExit             silent while hidden (SndInit again on the way back)
                     ldx       #1                  and no ticks (SOLdrv's mute)
                     lbsr      SolMute
 pw1                 ldx       #30
@@ -369,6 +372,16 @@ em1                 lda       #1                  stdout
                     lbsr      Stats2
                     lda       #1
                     os9       I$Write
+                    clrb                          a line a game
+em3                 cmpb      GSN,u
+                    bhs       em2
+                    pshs      b
+                    lbsr      Stats3
+                    lda       #1
+                    os9       I$Write
+                    puls      b
+                    incb
+                    bra       em3
 em2                 leax      Closer,pcr          the closer: Prospero, The Tempest 4.1
                     ldy       #ClosLen
                     lda       #1
@@ -414,17 +427,14 @@ ss1                 lda       #60
                     pshs      d
                     leay      STLINE,u
                     ldd       GFRAMS,u
-                    bsr       Dec5
                     leax      StTx1,pcr
-                    bsr       StCpy
+                    lbsr      DecCpy
                     ldd       PASSES,u
-                    bsr       Dec5
                     leax      StTx2,pcr
-                    bsr       StCpy
+                    lbsr      DecCpy
                     puls      d
-                    bsr       Dec5
                     leax      StTx3,pcr
-                    bsr       StCpy
+                    lbsr      DecCpy
                     tfr       y,d
                     leax      STLINE,u
                     pshs      x
@@ -437,23 +447,49 @@ ss1                 lda       #60
 *   drawings dropped behind a long one (frame.a).  X = the line, Y its length.
 Stats2              leay      STLINE,u
                     ldd       LNCALL,u
-                    bsr       Dec5
                     leax      StTx4,pcr
-                    bsr       StCpy
+                    bsr       DecCpy
                     ldd       LNSHRT,u
-                    bsr       Dec5
                     leax      StTx5,pcr
-                    bsr       StCpy
+                    bsr       DecCpy
                     ldd       DROPS,u
-                    bsr       Dec5
                     leax      StTx6,pcr
-                    bsr       StCpy
-                    tfr       y,d
+                    bsr       DecCpy
+                    ldd       TICKS,u             the signals counted: 60 a second, less any lost
+                    leax      StTx7,pcr
+                    bsr       DecCpy
+                    ldd       PAUSES,u            the terminal hidden (PausWt)
+                    leax      StTxB,pcr
+                    bsr       DecCpy
+StEnd               tfr       y,d
                     leax      STLINE,u
                     pshs      x
                     subd      ,s++
                     tfr       d,y
                     rts
+
+* Stats3 - B = a game (0 up): "FFFFF frames, TTTTT ticks, PPPPP passes",
+*   its row in GSTAB (GamStat).  X = the line, Y its length.
+Stats3              lda       #GSLEN
+                    mul
+                    leax      GSTAB,u
+                    leax      d,x
+                    pshs      x
+                    leay      STLINE,u
+                    ldd       ,x
+                    leax      StTx8,pcr
+                    bsr       DecCpy
+                    ldx       ,s
+                    ldd       2,x
+                    leax      StTx9,pcr
+                    bsr       DecCpy
+                    puls      x
+                    ldd       4,x
+                    leax      StTxA,pcr
+                    bsr       DecCpy
+                    ldd       #$0D0A
+                    std       ,y++
+                    bra       StEnd
 
 * StCpy - the text at X (ended by 0) to Y+
 StCpy               lda       ,x+
@@ -461,6 +497,12 @@ StCpy               lda       ,x+
                     sta       ,y+
                     bra       StCpy
 scx                 rts
+
+* DecCpy - D as Dec5 writes it, then the text at X (StCpy).  X clobbered.
+DecCpy              pshs      x
+                    bsr       Dec5
+                    puls      x
+                    bra       StCpy
 
 * Dec5 - D (unsigned) as 5 decimal digits at Y+, leading zeros as spaces.  X clobbered.
 Dec5                pshs      d                   4,s = the value
@@ -495,6 +537,44 @@ dc5                 sta       ,y+
                     leas      6,s
                     rts
 
+* GamStat - after a game frame's logic.  A game begins when QSTATU's
+*   bit 7 (a game on, not attract) sets: it takes the next row, up to
+*   GSMAX.  While it is on, its row counts its frames, and the ticks
+*   and passes since it began.  A, B, X clobbered.
+GamStat             lda       <QSTATU
+                    anda      #$80
+                    cmpa      GSPLAY,u
+                    beq       gs1
+                    sta       GSPLAY,u
+                    beq       gsx                 back to attract
+                    ldb       GSN,u
+                    cmpb      #GSMAX
+                    bhs       gsx                 (more games than rows: the rest not counted)
+                    inc       GSN,u
+                    ldd       TICKS,u
+                    std       GST0,u
+                    ldd       PASSES,u
+                    std       GSP0,u
+gs1                 tst       GSPLAY,u
+                    beq       gsx
+                    ldb       GSN,u
+                    beq       gsx
+                    decb
+                    lda       #GSLEN
+                    mul
+                    leax      GSTAB,u
+                    leax      d,x
+                    ldd       ,x
+                    addd      #1
+                    std       ,x
+                    ldd       TICKS,u
+                    subd      GST0,u
+                    std       2,x
+                    ldd       PASSES,u
+                    subd      GSP0,u
+                    std       4,x
+gsx                 rts
+
 Pow10               fdb       10000,1000,100,10,1
 StTx1               fcc       / game frames,/
                     fcb       0
@@ -506,8 +586,18 @@ StTx4               fcc       / line calls,/
                     fcb       0
 StTx5               fcc       / short,/
                     fcb       0
-StTx6               fcc       / dropped/
+StTx6               fcc       / dropped,/
+                    fcb       0
+StTx7               fcc       / ticks,/
+                    fcb       0
+StTxB               fcc       / paused/
                     fcb       $0D,$0A,0
+StTx8               fcc       / frames,/
+                    fcb       0
+StTx9               fcc       / ticks,/
+                    fcb       0
+StTxA               fcc       / passes/
+                    fcb       0
 Closer              fcc       /Our revels now are ended./
                     fcb       $0D
 ClosLen             equ       *-Closer

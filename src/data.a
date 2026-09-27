@@ -128,9 +128,17 @@ OPTOK               rmb       1                   OPTSAV holds a real packet
 TIMBUF              rmb       6                   F$Time's packet (the RANDOM seed)
 T0BUF               rmb       6                   F$Time at the first pass (the sign-off's numbers)
 PASSES              rmb       2                   passes of the frame loop (one a tick, if none ran long)
-STLINE              rmb       48                  the sign-off's numbers, as text
+STLINE              rmb       80                  the sign-off's numbers, as text
 LNCALL              rmb       2                   SS.BmLine calls (gfx.a BmSend), for the sign-off
 LNSHRT              rmb       2                   of them, returned short: the line FIFO's room ran out
+GSMAX               equ       8                   games counted for the sign-off (platform.a GamStat)
+GSLEN               equ       6                   a game's row: frames, ticks, passes
+GSN                 rmb       1                   games begun, up to GSMAX
+GSPLAY              rmb       1                   QSTATU's bit 7 at the last game frame: $80 = a game on
+GST0                rmb       2                   TICKS when this game began
+GSP0                rmb       2                   PASSES when it began
+PAUSES              rmb       2                   PausWt entered (the terminal hidden), for the sign-off
+GSTAB               rmb       GSMAX*GSLEN         the games' rows
 
 StkBase             equ       $1C00               the stack: the top 1K (as Joust), with OS-9's parameters
                     ifgt      .-StkBase
