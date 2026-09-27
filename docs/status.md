@@ -1786,6 +1786,126 @@ both its buttons together to pin 6**, as many Atari-style sticks do, so it can't
 User: "Time to get a new stick." Not tested with a stick that has a real second button. `joyview`
 (on the image) shows which bit a button sets.
 
+**Found later the same day, from the FPGA source (the read-only staging clone, 131a202,
+2026-09-23; the K2's core may be newer): stick buttons 1 and 2 can't be read on the K2 at all.**
+`TinyVKY2K2_IO_Page0_Devices.v:1277,1281`: VIA0 `port_a_i` = `{3'b111, VIA0_PA_in[4:0]}`, `port_b_i`
+= `{PB_i[8], 2'b11, VIA0_PB_in[4:0]}`. Only five lines a port come from the connector (up, down,
+left, right, fire: `CFP95139K2_Top.v` has `VIA0_PA_in`/`VIA0_PB_in` [4:0]); bits 5 and 6 are tied to 1,
+open. So on this core **the zap on stick button 1 or 2 never works, whatever the stick**; a new
+stick won't help. The Jr2's source ties them the same way. **Paddles: the same cause.** A paddle is a
+pot on DB9 pins 5 and 9, which don't reach the FPGA, and reading one needs an analog path (POKEY's
+way: a capacitor dumped, then the lines counted until it charges past a threshold; or an ADC). The
+paddles' fire buttons (pins 3 and 4, left and right) would read already. The codec's ADC is audio
+line-in, no use here.
+
+## SNES pad 0: steer, fire and zap (2026-09-27, host and MAME) — untested on hardware
+
+User: "Add SNES pad support for the zap" (the K2's stick can't: buttons 1 and 2 not wired, above).
+`input.a`: **SNES pad 0 through `SS.Joy` `JOY.SNES2`** (R$X = pad 0). The driver's pad word keeps the
+low byte stick-compatible, so the pad goes through the stick's decode, now the routine **`JoyA`**
+(left and right at `KEYRATE` a tick, button 0 = **SNES B fires**, button 2 = **SNES A zaps**). Read
+like the stick: every `JOYLOOK` 30 passes until used, then every pass (~515 µs a call at 8 MHz, from
+Joust's driver-performance.md). **A guard (`PADST`, data.a with `PADON`, `PADCNT`)**: the port can't
+tell whether a pad is plugged in and its first reading is empty, so the first reading is skipped,
+then the pad must read all zero once (at rest) before its buttons count. A port that reads held with
+no pad, or an NES pad (its missing A, X, L, R read held in SNES mode), is never taken. Pad 1, Y, X,
+L, R, Select and Start are unused.
+
+`osrun.py --pad snes|held|nes` (new): SS.Joy mode 4 gives a scripted pad 0 (the first reading empty,
+as the driver's) in place of the keys, and the run counts virtual IRQs with zap and fire held
+(`HW_60D8`). 45 s each: **snes zap held in 82, fire 4,945** (the pad plays); **held 0 and 0, nes 0 and
+0** (never taken); no pad as before; 21.7 game frames a second with and without the pad; every check
+right. The Wildbits MAME: 1,163 game frames in 45 s, no stuck zap, the sign-off. Module 39,923 bytes;
+on both disk images. **The pad's bit order is read from the RTL, never tried on a real pad**
+(grfdrv256-api.md): `joyview` (S for SNES) on the K2 shows it; B should read `10`, A `40`.
+
+## Left and right swapped (2026-09-27) — confirmed on the K2 in play; the menus reversed back, untested
+
+User: "I think we need to exchange the left and right key and joystick left and right directions.
+Controls seem backwards on horizontal levels." The flat wells' rim runs along the bottom of the
+screen, where the old right (clockwise) moved the claw left. `input.a`: the keys' and `JoyA`'s
+(stick and SNES pad) `KnbUp`/`KnbDn` calls exchanged, so right turns counterclockwise and moves the
+claw right on the flat wells, and on a closed well's bottom half. The mouse (SS.MsDelta, not yet in
+the driver) is unchanged. `osrun.py` 30 s: checks right; the Wildbits MAME: 1,203 game frames in 45 s,
+the sign-off. On both disk images (with the SNES pad build, also untested).
+
+**K2 (user, 2026-09-27): "keys are correct for game but backwards for initial level selector."**
+The rating ladder and the high score initials read the counts through `GINICO` (ALSCO2:820), where
++ is the next rating or initial, to the right on screen; so the swap reversed them. **`input.a`
+`KnbRev`**: while `QSTATE` is `$12` (GETINI, ALEXEC:94) or `$16` (PRORAT, ALEXEC:96), `KnbUp`/`KnbDn`
+turn the other way (keys, stick and pad; the game code is untouched, so the ROM-exact tests stand).
+Host (a scratch trace): right held on the ladder, state $16, `CURSL1` 0 -> 3 (up the ladder, as
+before the swap). `osrun.py` 30 s: checks right; the Wildbits MAME: 1,177 game frames in 45 s, the
+sign-off. Module 39,946 bytes; on both disk images. The initials: untested (same routine).
+
+## The slowdown after a few games (2026-09-27) — open; the sign-off made to measure it
+
+User: "If I run a few games in a row, all of the sudden the game slows down tremendously." Then: not
+the high score; "several games in one run without quitting. If I quit and restart, it goes back to
+normal speed"; "seems to happen on the 4th game in one run"; "I don't think the levels matter.
+Maybe it has to do with starting the 4th game?" A slowed run's sign-off: **2,362 game frames, 5,070
+passes in 101 s** (23.4 and 50.2 a second, against 26.9 and 58.3 fresh; still ~2.15 passes a
+game frame).
+
+**Ruled out:**
+- **A stale SOLdrv entry.** A leftover line-0 entry would halve our ticks (SOL_IRQSvc sends to one
+  entry a frame, in turn; entries are removed by line, not process), but it would survive a restart,
+  and restarting fixes this. Every exit of ours goes through `Cleanup` -> `SolOff`.
+- **Our code, as the model runs it.** A scratch harness (`osrun`'s host, coin and start every 20 s in
+  attract, the play script in play) ran ~7 simulated minutes, ~6 short games back to back: 19-26
+  game frames a second in every 10 s window, no trend.
+- **The 16-bit tick counters wrapping** (65,536 ticks = 18.2 min, about when a 4th long game
+  starts): with TICKS, TSEEN, TKNOW, DRWT0 and GST0 jumped to 20 s before the wrap, frames a second
+  either side are the same (21-25). All the tick arithmetic is differences.
+- The EAROM code (`WRHIIN`, `EAUPD`) only writes the hardware shadows; `NGAMES` only feeds the
+  rankings. The text list is capped at 256 entries.
+
+**So the cause is likely outside what the model runs: the driver, the OS, or the hardware.** Not
+yet known.
+
+**The sign-off now measures it (`platform.a`):** the second line ends with the run's **ticks** (the
+SOL signals counted: 60 a second of the elapsed time unless signals were lost; 16 bits, so under 18
+minutes), and a line a game (up to 8, `GamStat` after each game frame's logic, a game = `QSTATU`
+bit 7 set): **"FFFFF frames in TTTTT ticks, level LL"** (its game frames, the ticks since it began,
+the highest `WAVEN1` + 1 while it was on; the ladder's cursor can raise it). A game's frames/ticks
+x 60 is its frame rate; ticks against the seconds say whether signals went missing. `STLINE` 48 ->
+64 (the second line is 56 now). Module 40,175 bytes of 40,192. `osrun.py --quit`: the sign-off right
+(5,097 ticks in 85 s; 1,194 frames in 3,154 ticks, level 4); the Wildbits MAME: 2,717 ticks in 45 s.
+On both disk images.
+
+**K2 run 2 (user, 2026-09-27): "This time slowdown at game 2. Also, lose sound during slowdown.
+Maybe the sound loop?"** Sign-off: 4,059 game frames, 8,531 passes in 240 s; 4,612 line calls, 0
+short, 9 dropped, **14,259 ticks**; game 1 **2,052 frames in 4,516 ticks (27.3 a second)**, game 2
+**1,692 frames in 8,789 ticks (11.6 a second)**. So **the ticks arrive (59.4 a second): SOL is
+fine**; passes fall to 35.5 a second: each pass costs more, or the game isn't advancing. The sound
+dies at the same time. `SndOut` is bounded (8 channels, only changed registers), so it can't slow
+down by itself. The only thing that silences the SIDs in play is `SndExit` from **`PausWt`** (S$WinBg
+from grfdrv, sent only on a terminal switch); a pause mutes the SOL signal, so its ticks would be
+missing, and only ~1% are. `$FF98`/`$FF99`: only the CoCo 3 clock driver writes `$FF98` (its GIME video
+mode), not the Wildbits one; the kernel's `D.TINIT` etc. are direct-page copies.
+
+**Diagnostic build 2:** a game's row is now **"FFFFF frames, TTTTT ticks, PPPPP passes"** (the level
+dropped: passes tell a pass's length), and the second line ends with **"NNNNN paused"** (`PAUSES`,
+counted in `PausWt`). Code space: the number-then-text pairs folded into `DecCpy`; `STLINE` 80 (the
+second line is 70). Module 40,187 of 40,192 bytes. `osrun.py --quit`: 1,194 frames, 3,154 ticks, 2,450
+passes; 0 paused. The Wildbits MAME: the sign-off right. On both disk images.
+
+**K2 run 3, diagnostic build 2 (user, 2026-09-27): "now I can't replicate the behavior at all."**
+951 s, 25,587 game frames, 55,777 passes; 29,394 line calls, 0 short, 62 dropped, **56,660 ticks
+(59.6 a second), 0 paused**; eight rows (the eighth gathers games 8 on), each **27.0-27.3 game frames
+a second** (the eighth 25.5), passes about equal to ticks. What changed from build 1: the rows'
+third field (passes for the level), the pause count, `DecCpy`, `STLINE` 64 -> 80; nothing in the game,
+sound, input or frame code. The variables that moved are only the sign-off's (`$1A0F`-`$1A9C`, 355
+bytes below the stack), which could not silence the sound or slow the game if overwritten, so the
+layout change is not a credible explanation. **Most likely intermittent, its trigger not hit in this
+run.** Asked the user what differed (input device, keys, two players, superzapper, attract time).
+**The diagnostic lines stay** (user: "keep the diagnostic lines").
+
+**Also seen on the host, separate:** `osrun.py` 90 s reports "SS.BmLine into bitmap 1 before its
+clear has run" once, after a long caught-up pass (the logic can now run mid-tick; the clear it arms
+waits for the next line 0, and the drawing takes the next signal). On the K2 the fill halts the CPU,
+so the drawing can't start before it; whether it predates the FRTIMR carry is not yet checked.
+
 ## Open items
 
 1. The line-engine holes (FPGA developer).

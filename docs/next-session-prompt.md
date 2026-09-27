@@ -25,6 +25,17 @@ on has every step, each marked confirmed or untested):
     frame gate's IRQs past 9 carried (frame.a GamLog, FRCARY 4: before, frames took 3 ticks, a
     20-a-second cap whatever the CPU), KEYRATE 4 (keys and stick), all confirmed on the K2; and the
     superzapper on stick button 2 (JY.Btn2), untested: the user's stick wires both buttons to fire.
+  - After the merge (2026-09-27, main): the K2 core ties stick buttons 1-2 open (no stick zap, no
+    paddles; docs/status.md), so SNES pad 0 was added (input.a JoyA: d-pad, B fire, A zap; PADST
+    guard; osrun.py --pad), untested on a real pad; left/right swapped for keys, stick and pad
+    (confirmed in play) and reversed back in the rating ladder and initials (KnbRev, QSTATE
+    $12/$16; the ladder confirmed by host trace only). The sign-off gained ticks, pauses and a line
+    a game (frames, ticks, passes: platform.a GamStat), kept by the user. Module 40,187 of 40,192
+    bytes: 5 free.
+  - OPEN: a slowdown within one run (game 2 or 4 once each: frames to 11.6 a second with ticks at
+    59.4, sound lost; restart fixes it), then 8 clean games in 16 minutes on the diagnostic build.
+    Not SOL, not the tick wrap, not seen in the host model. docs/status.md "The slowdown after a
+    few games" has every step.
   - Before that, in order: small shapes collapsed to dots (AVCOLL), BmWait gone, sound on the two
     SIDs (POKEY image), layers (0 tile map off, 1 lines, 2 text and the well), the well
     cached and skipped while its SWWELL word and colour hold (AVWELL), the 8,192-entry line FIFO,

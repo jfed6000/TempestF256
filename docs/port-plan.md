@@ -210,9 +210,10 @@ joystick**, all three, feeding the same `TBHD` counts:
 
 | Control | Rotate | Fire | Superzapper | Source |
 |---|---|---|---|---|
-| Keyboard | ← → at a **constant rate** | **Shift** | **`z`** (lower case: `SS.LiveKeys` returns unshifted codes) | one `SS.LiveKeys` a frame: arrows and Shift are sense bits, `z` a held key |
+| Keyboard | ← → at a **constant rate** (right = counterclockwise, user 2026-09-27) | **Shift** | **`z`** (lower case: `SS.LiveKeys` returns unshifted codes) | one `SS.LiveKeys` a frame: arrows and Shift are sense bits, `z` a held key |
 | Mouse | X motion, **proportional** | left button | right button | `SS.MsDelta` (approved, section 6.1) |
 | Joystick | left/right at a constant rate | button 0 | button 2 (user 2026-09-27; was button 1) | `SS.Joy` mode 2 |
+| SNES pad 0 | d-pad left/right at the same rate | B | A (user 2026-09-27) | `SS.Joy` mode 4 |
 
 This is MAME's model too: the knob is an `IPT_DIAL` with `PORT_KEYDELTA(20)` (`tempest.cpp:612`), so
 keys and a digital stick turn it at a fixed rate while held, and a mouse drives it proportionally
