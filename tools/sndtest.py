@@ -2,8 +2,9 @@
 """sndtest.py - tsnd ("tempest s", src/sound.a) on the host 6809: the output stage's host test.
 
 Runs the module as osrun.py does, with "s" as its parameters, presses r (the sequence: each of the
-13 sounds alone, then two pairs) and taps every write into the SIDs' I/O block ($C4, mapped through
-the service window).  After each pass (at its F$Sleep) it checks the SIDs against the POKEY image
+13 sounds alone, then two pairs) and taps every write to the SIDs' selector and data ($FF98, $FF99:
+the new core's $FF90 sound block; the selector: bits 6-5 the target, 00 left, 01 right, 10 both,
+11 disabled; bits 4-0 the register).  After each pass (at its F$Sleep) it checks the SIDs against the POKEY image
 (POKIMG) that ALSOUN's MODSND wrote, by sound.a's mapping:
 
   - every POKEY channel sounding (AUDC volume 1-15, bit 4 clear) has one voice, gated, with the
@@ -36,7 +37,8 @@ from osrun import Host, Exit, MODBASE, DATA, SRC, HZ, TICK  # noqa: E402
 
 SS_READY, E_NOTRDY = 0x01, 246
 I_READ = 0x89
-SIDBLK = 0xC4
+SIDSEL, SIDDAT = 0xFF98, 0xFF99
+SIDL, SIDR, SIDB = 0x00, 0x20, 0x40       # the selector's targets, bits 6-5 ($60: disabled)
 POKIMG = 0x0800
 
 
@@ -45,13 +47,13 @@ class SndHost(Host):
         super().__init__(*a)
         self.keys = dict(keys)              # tick -> the key pressed then
         self.pending = []
-        self.sid = bytearray(0x200)
-        self.sidbase = None                 # the window the SIDs were last mapped into
-        self.taps = set()
+        self.sid = bytearray(0x200)         # the left SID at +$000, the right at +$100
+        self.sel = 0                        # the selector as last written
         self.writes = 0
         self.gates_off_on = 0
         self.gate_seen_low = [False] * 6
-        self.remaps = 0
+        self.bad_sel = 0                    # selector values with no known target
+        self.map_io(SIDSEL, SIDDAT, self.sid_r, self.sid_w)
 
     def os9(self, fn):
         if fn == I_READ:
@@ -66,44 +68,33 @@ class SndHost(Host):
                 self.pending.append(k)
         return super().os9(fn)
 
-    def on_map(self, base, block):
-        """the MMU put a block in a window's slot (sound.a SidOn): tap the SIDs there"""
-        if block != SIDBLK:
-            return
-        self.sidbase = base
-        self.remaps += 1
-        if base not in self.taps:
-            self.taps.add(base)
-            self.map_io(base, base + 0x1FF, lambda a, b=base: self.sid_r(a, b),
-                        lambda a, v, b=base: self.sid_w(a, v, b))
-
     def stat(self, get, code):
         if get and code == SS_READY:
             return 0 if self.pending else E_NOTRDY
         return super().stat(get, code)
 
-    def sid_here(self, base):
-        return self.mapped.get(base) == SIDBLK
+    def sid_r(self, a):
+        return 0xFF                         # write only
 
-    def sid_r(self, a, base):
-        return self.sid[a - base] if self.sid_here(base) else self.mem[a]
-
-    def sid_w(self, a, v, base):
-        if not self.sid_here(base):         # the window holds another block now (the text's)
-            self.mem[a] = v
+    def sid_w(self, a, v):
+        if a == SIDSEL:
+            self.sel = v
             return
-        off = a - base
+        tgt, r = self.sel & 0x60, self.sel & 0x1F       # bit 7 ignored
+        chips = {SIDL: (0,), SIDR: (1,), SIDB: (0, 1)}.get(tgt)
+        if chips is None:
+            self.bad_sel += 1
+            return
         self.writes += 1
-        if off < 0x80 or 0x100 <= off < 0x180:
-            chip, r = off >> 8, off & 0x7F
+        for chip in chips:
+            off = chip * 0x100 + r
             if r < 21 and r % 7 == 4:
                 v_ = chip * 3 + r // 7
                 if not v & 1:
                     self.gate_seen_low[v_] = True
                 elif self.sid[off] & 1 == 0 and self.gate_seen_low[v_]:
                     self.gates_off_on += 1
-        self.sid[off] = v
-        self.mem[a] = v
+            self.sid[off] = v
 
     def voice(self, v):
         base = (v // 3) * 0x100 + (v % 3) * 7
@@ -171,7 +162,7 @@ def main():
         while h.cycles < end:
             pc = h.pc
             if h.mem[pc] == 0x10 and h.mem[pc + 1] == 0x3F and h.mem[pc + 2] == osrun.F_SLEEP \
-                    and h.x in (0, 2) and h.sidbase is not None:     # a pass's end (0: the SOL clock)
+                    and h.x in (0, 2) and h.writes:     # a pass's end (0: the SOL clock)
                 checked += 1
                 img = h.mem[DATA + POKIMG:DATA + POKIMG + 16]
                 seq = 0 if a.game else h.mem[DATA + sym["TSSEQ"]]
@@ -208,8 +199,10 @@ def main():
     except Exit as e:
         print("exit: %s" % (e,))
     print("ran %.1f s: %d passes checked, %d wrong; %d SID writes; %d re-gates; at most %d channels"
-          " at once; SidOn %d times" % (h.cycles / HZ, checked, bad, h.writes, h.gates_off_on,
-                                                 maxvoices, h.remaps))
+          " at once" % (h.cycles / HZ, checked, bad, h.writes, h.gates_off_on, maxvoices))
+    if h.bad_sel:
+        print("SID writes with an unknown selector target: %d" % h.bad_sel)
+        bad += 1
     if deferred:
         print("passes that ended with the text in the window (not checked): %d" % deferred)
     for f in fails:

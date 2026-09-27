@@ -3,13 +3,13 @@
 *   MODSND) played on the two soft SIDs (plan D5 (a), stage 4), and
 *   tsnd, the sound test (tempest s).
 *
-*   The SIDs are in the I/O block $C4 (the FPGA's $18_8000: left at
-*   +$000, right at +$100; +$080 writes both).  They are reached by
-*   writing the MMU directly (user's call, 2026-09-23: the third absolute
-*   address exception, $FFA0-$FFAF): interrupts masked, window A's slot
-*   holds $C4 while the SIDs are written, then its block again.  With
-*   interrupts masked no task switch can reload the MMU, and vector RAM
-*   is only used by the main loop, which SndOut is part of.
+*   The SIDs are written through the fixed I/O page (branch ff90-sound,
+*   2026-09-24: the new core moved the sound registers from block $C4
+*   to $FF91-$FF99, so no block is mapped and the MMU is not touched):
+*   the register's selector at $FF98 (its SID, left, right or both, and
+*   the register 0-$1F), then the data at $FF99.  The selector holds
+*   between data writes; no interrupt handler writes the SIDs, so the
+*   pair needs no mask.
 *   Two SIDs are six voices for the POKEYs' eight channels; Tempest
 *   sounds at most five at once (docs/status.md, "Sound"), so a
 *   channel takes a free voice when it starts sounding and gives it
@@ -31,95 +31,57 @@
 *   Runs with U = the data area and DP its page.
 ********************************************************************
 
-SIDBLK              equ       $C4                 the I/O block the SIDs are in
+SIDSEL              equ       $FF98               the SIDs' selector: the target (SIDL, SIDR, SIDB) + the register
+SIDDAT              equ       $FF99               the data for the selected register (write only)
+SIDL                equ       $00                 the target (bits 6-5): the left SID
+SIDR                equ       $20                 the right SID
+SIDB                equ       $40                 both ($60: disabled)
 SIDPWH              equ       $08                 a pulse's width, high nibble: 50%
 SIDVOL              equ       $0F                 each SID's master volume, filters off
 SNFDIV              equ       59319               the noise's SID frequency times (AUDF+1)
 
-MMUCTL              equ       $FFA0               the MMU: bits 1-0 the active LUT, 5-4 the one $FFA8-$FFAF edit
-MMUSLT              equ       $FFA8               the edited LUT's eight slots (read and write)
-
-* SidOn - interrupts masked, window A's slot holding the SIDs' block.
-*   Exit: X = the left SID.  Y, U kept.  SidOff must follow, soon: it
-*   puts the slot and the mask back.
-SidOn               tfr       cc,a
-                    sta       SNDCC,u
-                    orcc      #$50
-                    lda       MMUCTL              pic:ok the MMU (user-approved exception)
-                    sta       SNDF0,u
-                    anda      #$03                edit the active LUT
-                    lsla
-                    lsla
-                    lsla
-                    lsla
-                    pshs      a
-                    lda       SNDF0,u
-                    anda      #$CF
-                    ora       ,s+
-                    sta       MMUCTL              pic:ok
-                    lda       VWIN,u              window A's slot: its address / 8K
-                    lsra
-                    lsra
-                    lsra
-                    lsra
-                    lsra
-                    sta       SNDSL,u
-                    ldx       #MMUSLT
-                    ldb       SNDSL,u
-                    lda       b,x
-                    sta       SNDOB,u             its block, to put back
-                    lda       #SIDBLK
-                    sta       b,x
-                    ldx       VWIN,u
+* SidW - A into the register B selects (its target + the register).
+*   A, X, Y kept.
+SidW                stb       SIDSEL              pic:ok the fixed I/O page
+                    sta       SIDDAT              pic:ok
                     rts
 
-* SidOff - window A's block back in its slot, the MMU's LUT selection
-*   and the interrupt mask as SidOn found them.  All registers kept but CC.
-SidOff              pshs      a,b,x
-                    ldx       #MMUSLT
-                    ldb       SNDSL,u
-                    lda       SNDOB,u
-                    sta       b,x
-                    lda       SNDF0,u
-                    sta       MMUCTL              pic:ok
-                    lda       SNDCC,u
-                    tfr       a,cc
-                    puls      a,b,x,pc
+* SidVW - A into register B (0-6) of the voice SidVoc chose.
+*   A, X, Y kept, B clobbered.
+SidVW               addb      SNDSEL,u
+                    bra       SidW
 
-* SidReg - X = the left SID, B = voice 0-5: Y = the voice's registers.
-*   B, X kept.
-SidReg              pshs      b,x
-                    leay      SidVof,pcr
-                    lslb
-                    ldd       b,y
-                    addd      1,s
-                    tfr       d,y
+* SidVoc - B = voice 0-5: SNDSEL = its registers' selector.  All kept.
+SidVoc              pshs      b,x
+                    leax      SidVsl,pcr
+                    ldb       b,x
+                    stb       SNDSEL,u
                     puls      b,x,pc
-SidVof              fdb       $000,$007,$00E,$100,$107,$10E
+SidVsl              fcb       SIDL+0,SIDL+7,SIDL+14,SIDR+0,SIDR+7,SIDR+14
 
 ********************************************************************
 * SndInit - both SIDs silent and set up; every voice free.
 *   Exit: carry = error in B.
 ********************************************************************
-SndInit             lbsr      SidOn
-                    ldb       #$19                every register of both SIDs to 0
+SndInit             ldb       #$19                every register of both SIDs to 0
 si1                 decb
-                    clr       b,x
-                    leay      $100,x
-                    clr       b,y
+                    clra
+                    pshs      b
+                    addb      #SIDB
+                    bsr       SidW
+                    puls      b
                     tstb
                     bne       si1
-                    clrb                          each voice's pulse width
-si2                 bsr       SidReg
-                    lda       #SIDPWH
-                    sta       3,y
-                    incb
-                    cmpb      #6
-                    blo       si2
+                    lda       #SIDPWH             each voice's pulse width (on both)
+                    ldb       #SIDB+3
+                    bsr       SidW
+                    ldb       #SIDB+3+7
+                    bsr       SidW
+                    ldb       #SIDB+3+14
+                    bsr       SidW
                     lda       #SIDVOL
-                    sta       $18,x
-                    sta       $118,x
-                    lbsr      SidOff
+                    ldb       #SIDB+$18
+                    bsr       SidW
                     leay      SNDVCH,u            no voice owned, no channel voiced
                     ldb       #6+8
                     lda       #$FF
@@ -141,16 +103,15 @@ si4                 clr       ,y+
 SndExit             tst       SNDUP,u
                     beq       sxx
                     clr       SNDUP,u
-                    lbsr      SidOn
-                    clrb
-se1                 bsr       SidReg
-                    clr       4,y
-                    incb
-                    cmpb      #6
-                    blo       se1
-                    clr       $18,x
-                    clr       $118,x
-                    lbra      SidOff
+                    clra                          each voice's gate, then the volume (on both)
+                    ldb       #SIDB+4
+                    bsr       SidW
+                    ldb       #SIDB+4+7
+                    bsr       SidW
+                    ldb       #SIDB+4+14
+                    bsr       SidW
+                    ldb       #SIDB+$18
+                    lbra      SidW
 sxx                 rts
 
 ********************************************************************
@@ -158,8 +119,6 @@ sxx                 rts
 ********************************************************************
 SndOut              tst       SNDUP,u
                     lbeq       sox
-                    lbsr      SidOn               (masked until SidOff)
-                    stx       SNDBAS,u
                     clr       SNDCH,u
 so1                 ldb       SNDCH,u             channel c: AUDF at POKIMG + 2c, AUDC after it
                     lslb
@@ -227,9 +186,8 @@ so4a                lslb
 so4b                std       SNDF,u
                     lda       #$41                pulse, gated
 so5                 sta       SNDCT,u
-                    ldx       SNDBAS,u
                     ldb       SNDV,u
-                    lbsr      SidReg              Y = the voice's registers
+                    lbsr      SidVoc              the voice's registers
                     leax      SNDVF,u             the frequency, if it changed
                     lslb
                     abx
@@ -237,8 +195,12 @@ so5                 sta       SNDCT,u
                     cmpd      ,x
                     beq       so6
                     std       ,x
-                    stb       0,y
-                    sta       1,y
+                    lda       SNDF+1,u
+                    clrb
+                    lbsr      SidVW
+                    lda       SNDF,u
+                    ldb       #1
+                    lbsr      SidVW
 so6                 ldb       SNDV,u              X = its control shadow, 6,X its sustain's
                     leax      SNDVC,u
                     abx
@@ -250,27 +212,30 @@ so6                 ldb       SNDV,u              X = its control shadow, 6,X it
                     beq       sonx
                     bhi       sotr                louder: the envelope needs a new gate
                     sta       6,x                 softer: the sustain follows down
-                    sta       6,y
+                    ldb       #6
+                    lbsr      SidVW
                     bra       sonx
 sotr                lda       ,x
                     bita      #$01
                     beq       sotr2
                     anda      #$FE                gate off first, long enough to be seen
-                    sta       4,y
+                    ldb       #4
+                    lbsr      SidVW
                     ldb       #40                 25 us
 sotr1               decb
                     bne       sotr1
 sotr2               lda       SNDSR,u
                     sta       6,x
-                    sta       6,y
+                    ldb       #6
+                    lbsr      SidVW
                     lda       SNDCT,u
                     sta       ,x
-                    sta       4,y
+                    ldb       #4
+                    lbsr      SidVW
 sonx                inc       SNDCH,u
                     lda       SNDCH,u
                     cmpa      #8
                     lblo      so1
-                    lbra      SidOff
 sox                 rts
 * channel c is silent: its voice, if it has one, gated off and freed
 soff                ldb       SNDCH,u
@@ -286,8 +251,7 @@ soff                ldb       SNDCH,u
                     ldb       ,s
                     sta       b,x
                     puls      b
-                    ldx       SNDBAS,u
-                    lbsr      SidReg
+                    lbsr      SidVoc
                     leax      SNDVC,u
                     abx
                     lda       ,x
@@ -295,7 +259,8 @@ soff                ldb       SNDCH,u
                     cmpa      ,x
                     beq       sonx
                     sta       ,x
-                    sta       4,y
+                    ldb       #4
+                    lbsr      SidVW
                     bra       sonx
 
                     ifdef     TSND                (make EXTRA="-DTSND"; tools/sndtest.py builds it)
