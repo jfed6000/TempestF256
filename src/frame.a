@@ -26,6 +26,7 @@ VIRQN               equ       525                 virtual IRQs a tick, times VIR
 VIRQD               equ       128
 TKMAX               equ       32                  ticks a pass catches up at most (a superzapper blast: ~15)
 SKIPT               equ       5                   a drawing this many ticks long drops the next one
+FRCARY              equ       4                   FRTIMR past 9 kept at most (GamLog): a tick's IRQs
                     ifndef    HIRES
 HIRES               equ       1                   the line bitmaps 640x240 (gfx.a; branch hires640)
                     endc
@@ -129,7 +130,12 @@ mlx                 lbra      MainLoop
 *   (BmWait's GetStat went, docs/status.md).  Waiting for it here cost
 *   the rest of the tick (docs/port-plan.md D9).
 ********************************************************************
-GamLog              clr       <FRTIMR             ALEXEC:53 LDA I,0 / STA FRTIMR
+GamLog              lda       <FRTIMR             ALEXEC:53 LDA I,0 / STA FRTIMR, but the
+                    suba      #9                  IRQs past the 9 carried: the arcade polls
+                    cmpa      #FRCARY             FRTIMR all the time, a pass only at a tick
+                    bls       gl1                 (4.1 IRQs), so a clear loses up to 4 a
+                    lda       #FRCARY             frame: 3 ticks a frame, 20 a second
+gl1                 sta       <FRTIMR             (FRCARY: a late frame is not caught up)
                     lda       SHOWN,u
                     eora      #1
                     lbsr      BmArm               the hidden line bitmap, cleared in the next blank

@@ -7,7 +7,7 @@
 *   tick, Shift fires, z is the superzapper (lower case: the driver's
 *   codes are unshifted), 1 and 2 are the start buttons, 5 drops a coin,
 *   q quits.  Joystick 0 (SS.Joy JOY.Sticks): left and right at the same
-*   rate, button 0 fires, button 1 zaps.  Mouse (SS.MsDelta $D0, when
+*   rate, button 0 fires, button 2 zaps.  Mouse (SS.MsDelta $D0, when
 *   the driver has it): X motion, one count a count; left button fires,
 *   right zaps.  All of them together.
 *
@@ -16,7 +16,7 @@
 ********************************************************************
 
 SS.MsDelta          equ       $D0                 approved (plan 6.1); not in the driver yet
-KEYRATE             equ       2                   encoder counts a tick while a key or the stick is held
+KEYRATE             equ       4                   encoder counts a tick while a key or the stick is held
 KNBMAX              equ       64                  counts owed at most, either way
 COINLEN             equ       8                   virtual IRQs the coin switch stays closed (32 ms)
 JOYLOOK             equ       30                  passes between looks at a stick not yet used
@@ -113,7 +113,7 @@ ij2                 bita      #JY.Btn0
                     beq       ij3
                     ldb       #BT.Fire
                     bsr       BtnOn
-ij3                 bita      #JY.Btn1
+ij3                 bita      #JY.Btn2
                     beq       injx
                     ldb       #BT.Zap
                     bsr       BtnOn

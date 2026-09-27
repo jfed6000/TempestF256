@@ -154,7 +154,7 @@ u1x                 rts
 *   windows, the sign-off, the terminal's options
 ********************************************************************
 Cleanup             lbsr      SolOff              no more signals
-                    lbsr      SndExit             the SIDs silent (before the window goes)
+                    lbsr      SndExit             the SIDs silent (the SIDs are fixed I/O: no window needed)
                     lbsr      InExit              the mouse back to pointer mode
                     lbsr      WSigClr             stop the driver signalling a dead process
                     lbsr      GfxExit

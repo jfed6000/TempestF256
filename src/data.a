@@ -62,16 +62,12 @@ SNDVC               rmb       6                   a voice's control register as 
 SNDVS               rmb       6                   its sustain/release register as written
 SNDVF               rmb       12                  its frequency as written (high, low)
 SNDUP               rmb       1                   non-zero: SndInit ran (SndExit silences)
-SNDBAS              rmb       2                   SndOut: the left SID's logical address
+SNDSEL              rmb       1                   SidVoc: the voice's registers' selector
 SNDCH               rmb       1                   SndOut: the channel
 SNDV                rmb       1                   SndOut: its voice
 SNDSR               rmb       1                   SndOut: the sustain/release wanted
 SNDF                rmb       2                   SndOut: the frequency wanted
 SNDCT               rmb       1                   SndOut: the control register wanted
-SNDCC               rmb       1                   SidOn: CC as found (the interrupt mask)
-SNDF0               rmb       1                   SidOn: the MMU's control register as found
-SNDSL               rmb       1                   SidOn: window A's slot
-SNDOB               rmb       1                   SidOn: the block it held
 TSMODE              rmb       1                   the first character of the parameters ('s': tsnd)
 TSRUN               rmb       1                   tsnd: the sequence is playing
 TSSEQ               rmb       1                   tsnd: its next step (offset in TsSeq)
