@@ -66,9 +66,12 @@ mlt                 ldx       #2                  wait for the next tick (X = 1 
                     os9       F$Sleep
                     lda       #1
                     sta       TKN,u
-mlp                 ldd       PASSES,u            (the sign-off reports them)
+mlp
+                    ifdef     DIAG
+                    ldd       PASSES,u            (the sign-off reports them)
                     addd      #1
                     std       PASSES,u
+                    endc
                     tst       SIGCODE,u
                     lbne      Done
                     tst       PAUSED,u
@@ -96,16 +99,20 @@ ml2                 lbsr      SndOut              the POKEY image onto the SIDs 
                     cmpa      #9
                     lblo      MainLoop
                     lbsr      GamLog
+                    ifdef     DIAG
                     lbsr      GamStat             (the sign-off's line a game: platform.a)
                     ldd       GFRAMS,u            (the game's frames: its pace, drawn or not)
                     addd      #1
                     std       GFRAMS,u
+                    endc
                     tst       SKIPNX,u            the last drawing ran long: this frame is not drawn
                     beq       mlq
                     clr       SKIPNX,u
+                    ifdef     DIAG
                     ldd       DROPS,u
                     addd      #1
                     std       DROPS,u
+                    endc
                     ifdef     AVWELL
                     clr       AVGPG+AV.CVAL,u     (the well may be rebuilt twice unseen: its cache goes)
                     endc

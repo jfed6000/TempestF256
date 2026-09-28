@@ -36,8 +36,11 @@ on has every step, each marked confirmed or untested):
     host and fixed in 57fd80d: gfx.a bcgo latched NODMA on SS.BmClear's E$DevBsy (a fill still
     outstanding after two logic passes in one frame, a dropped drawing between, allowed by the FRTIMR
     carry), so the CPU cleared 80K every frame. Busy is now success. Host replay 8.0 -> 23.0; NOT YET
-    RUN ON THE K2 (check every game line of the sign-off stays ~27, and the sound). docs/status.md
-    "The slowdown found". Module 40,191 of 40,192 bytes: 1 free.
+    CONFIRMED ON THE K2 (user: "No slowdowns"). docs/status.md "The slowdown found".
+  - Then the port was called feature-complete and the sign-off's numbers went behind a build flag,
+    DIAG (make EXTRA="-DDIAG"): the plain (production) module is 39,541 of 40,192 bytes and signs
+    off with "Tempest over." (now CR LF) and the closer only. The production build is on both disk
+    images (K2 and Jr2), checked in the Wildbits MAME.
   - Before that, in order: small shapes collapsed to dots (AVCOLL), BmWait gone, sound on the two
     SIDs (POKEY image), layers (0 tile map off, 1 lines, 2 text and the well), the well
     cached and skipped while its SWWELL word and colour hold (AVWELL), the 8,192-entry line FIFO,

@@ -1906,7 +1906,7 @@ clear has run" once, after a long caught-up pass (the logic can now run mid-tick
 waits for the next line 0, and the drawing takes the next signal). On the K2 the fill halts the CPU,
 so the drawing can't start before it; whether it predates the FRTIMR carry is not yet checked.
 
-## The slowdown found: NODMA latched on E$DevBsy (2026-09-27, host) — the fix untested on hardware
+## The slowdown found: NODMA latched on E$DevBsy (2026-09-27, host) — the fix confirmed on the K2
 
 **Reproduced on the host.** A scratch harness (games back to back, coin and start in attract, the
 high-score table zeroed so every game enters initials, and a check for stores from the game code
@@ -1938,6 +1938,30 @@ CPU; the port already requires the fixed core.)
 once: the drawing after such a double logic pass starts on the same line-0 signal as the pending
 fill, and the model lets it; on the K2 the fill halts the CPU for its 384 µs, so it can't. The
 Wildbits MAME: the game, 1,216 game frames in 45 s, the sign-off. On both disk images.
+
+## The sign-off's numbers behind a build flag (2026-09-27, host)
+
+User: no more features to add, so the debug code goes behind a flag. **`DIAG`**, as `TSND` is:
+`make` builds the plain module, whose sign-off is "Tempest over." and the closing line only;
+**`make EXTRA="-DDIAG"`** (touch `tempest.asm` first) builds the diagnostic one, with the three kinds of
+numbers lines (the run; line calls, short, dropped, ticks, paused; a line a game). Inside `ifdef DIAG`:
+`platform.a` `Stats`-`StTxA` (the printing, `GamStat`), `ExitMsg`'s calls to them, `T0BUF`'s `F$Time`
+and `PausWt`'s count; the counters `PASSES`, `GFRAMS`, `DROPS` (`frame.a`), `LNCALL`, `LNSHRT`
+(`gfx.a`) and the sound test's `PASSES` (`sound.a`); their variables in `data.a`. `TIMBUF` (the
+seed), `EXITST` and `SKIPNX` stay: the game uses them.
+
+**Plain module 39,540 bytes of 40,192 (652 free); the `DIAG` build is byte-identical to 57fd80d's
+40,191.** `osrun.py` 60 s on both: the checks right; `--quit`: the plain sign-off `Tempest over.` then
+the closer, the `DIAG` one with its numbers as before. `sndtest.py` (`TSND` without `DIAG`) assembles
+and runs right.
+
+**The K2 (user, 2026-09-27), on the `DIAG` build: "Works on K2. No slowdowns."** The slowdown fix is
+confirmed. Then the **production build** (plain) went onto both disk images (`l2_wildbitsk2.dsk`,
+`l2_wildbitsjr2.dsk`: targeted copy, read back and compared). The Wildbits MAME caught a sign-off bug
+the numbers had hidden: `ByeMsg` ended in a CR alone, so the closer overwrote "Tempest over." on the
+same row (in `DIAG` builds the first numbers line did). Now CR LF: **module 39,541 bytes** (651
+free); MAME shows "Tempest over.", the closer, the prompt. A `DIAG` build now differs from 57fd80d by
+that byte.
 
 ## Open items
 

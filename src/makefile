@@ -3,6 +3,7 @@
 #   make                          build tempest; the budget and PIC checks
 #   make install DSK=image.dsk    copy it to CMDS on a disk image (a targeted copy, nothing else)
 #   make EXTRA="-DRECUS=170"      a build with a frame.a budget changed (touch tempest.asm first)
+#   make EXTRA="-DDIAG"           the diagnostic build: the sign-off's numbers (touch tempest.asm first)
 #
 # The host tests build the game alone from tempest.a (tools/xlattest.py --src, tools/avgtest.py).
 

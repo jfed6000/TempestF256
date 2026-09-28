@@ -57,8 +57,10 @@ st1                 clr       ,x+
                     lbsr      SndInit             the SIDs (a failure leaves the game silent)
                     lbsr      GamInit             the arcade's reset, less its self-test
                     lbsr      SolOn               the clock: SOLdrv's signal at every frame
+                    ifdef     DIAG
                     leax      T0BUF,u             the time the loop starts (the sign-off's numbers)
                     os9       F$Time
+                    endc
                     lbra      MainLoop            frame.a
 
 Done                clrb
@@ -184,9 +186,12 @@ cu1                 lbsr      ExitMsg             clear the screen and sign off
 *   away is not owed as virtual IRQs: the game stood still.  A frame's
 *   drawing that was under way goes on where it stopped.
 ********************************************************************
-PausWt              ldd       PAUSES,u            (the sign-off counts them)
+PausWt
+                    ifdef     DIAG
+                    ldd       PAUSES,u            (the sign-off counts them)
                     addd      #1
                     std       PAUSES,u
+                    endc
                     lbsr      SndExit             silent while hidden (SndInit again on the way back)
                     ldx       #1                  and no ticks (SOLdrv's mute)
                     lbsr      SolMute
@@ -348,11 +353,12 @@ orx                 rts
 ********************************************************************
 * ExitMsg - clear the text screen and sign off (after GfxExit has put
 *   the text mode back).  An error exit clears the screen only and lets
-*   the shell report the error.
+*   the shell report the error.  The run's numbers come only in a
+*   diagnostic build (make EXTRA="-DDIAG").
 ********************************************************************
 ByeMsg              fcb       $0C                 clear the screen and home
                     fcc       /Tempest over./
-                    fcb       $0D
+                    fcb       $0D,$0A             (a CR alone returns on the same row: the next line overwrote it)
 ByeLen              equ       *-ByeMsg
 
 ExitMsg             leax      ByeMsg,pcr
@@ -364,6 +370,7 @@ em1                 lda       #1                  stdout
                     os9       I$Write
                     tst       EXITST,u
                     bne       emx
+                    ifdef     DIAG
                     tst       T0BUF,u             the loop never started
                     beq       em2
                     bsr       Stats
@@ -382,12 +389,14 @@ em3                 cmpb      GSN,u
                     puls      b
                     incb
                     bra       em3
+                    endc
 em2                 leax      Closer,pcr          the closer: Prospero, The Tempest 4.1
                     ldy       #ClosLen
                     lda       #1
                     os9       I$Write
 emx                 rts
 
+                    ifdef     DIAG                the sign-off's numbers: make EXTRA="-DDIAG"
 ********************************************************************
 * Stats - the run in numbers, for the sign-off: "GGGGG game frames,
 *   PPPPP passes in SSSSS s".  One pass a tick means passes = 60 a
@@ -598,6 +607,7 @@ StTx9               fcc       / ticks,/
                     fcb       0
 StTxA               fcc       / passes/
                     fcb       0
+                    endc
 Closer              fcc       /Our revels now are ended./
                     fcb       $0D
 ClosLen             equ       *-Closer

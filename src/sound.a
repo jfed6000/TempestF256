@@ -285,9 +285,11 @@ ts1                 ldx       #2                  one tick
                     os9       F$Sleep
                     tst       SIGCODE,u
                     lbne      Done
+                    ifdef     DIAG
                     ldd       PASSES,u
                     addd      #1
                     std       PASSES,u
+                    endc
                     ldd       VACC,u              the virtual IRQs this tick owes: MODSND's
                     addd      #VIRQN
                     std       VACC,u

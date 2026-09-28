@@ -342,9 +342,11 @@ afr                 rts
 BmSend              lda       #20
                     sta       FLSHN,u
 af1                 pshs      b,x                 ,s = records left, 1,s = the next
+                    ifdef     DIAG
                     ldd       LNCALL,u            (the sign-off counts the calls)
                     addd      #1
                     std       LNCALL,u
+                    endc
                     ldb       BSBM,u
                     clra
                     tfr       d,y                 Y = the bitmap
@@ -357,6 +359,7 @@ af1                 pshs      b,x                 ,s = records left, 1,s = the n
                     tfr       u,d
                     puls      u
                     bcs       afx
+                    ifdef     DIAG
                     cmpb      ,s                  short (the FIFO's room ran out): counted
                     bhs       af2
                     pshs      b
@@ -364,6 +367,7 @@ af1                 pshs      b,x                 ,s = records left, 1,s = the n
                     addd      #1
                     std       LNSHRT,u
                     puls      b
+                    endc
 af2                 tstb
                     beq       af3                 none: the FIFO is full
                     pshs      b
