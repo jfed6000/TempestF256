@@ -1963,7 +1963,7 @@ same row (in `DIAG` builds the first numbers line did). Now CR LF: **module 39,5
 free); MAME shows "Tempest over.", the closer, the prompt. A `DIAG` build now differs from 57fd80d by
 that byte.
 
-## The disk images rebuilt for the new kernel (2026-09-27) — booted in MAME; FLASHDIS untested on hardware
+## The disk images rebuilt for the new kernel (2026-09-27) — booted in MAME; FLASHDIS confirmed on hardware 2026-09-30
 
 The user put a new `level2/modules/kernel/krnp2.asm` in the Joust tree's nitros9 (from
 `~/projects/wild/Sept2026/nitros9`): the block map grows to 256 entries on **both** machines now (the
@@ -1994,9 +1994,10 @@ The port is feature-complete (user, 2026-09-27). What remains is hardware confir
 2. **The rating ladder and initials** with left/right reversed back: host trace only.
 3. **The superzapper on stick button 2**: impossible on the current K2 core (VIA0 bits 5-6 tied
    to 1); the pad's A or the keys zap.
-4. **A Jr2 hardware run**: none recorded. The Jr2 image holds the production build.
-5. **The new kernel's FLASHDIS** (768K more RAM) on either machine: untested; the nitros9
-   `krnp2.asm` and `defs/wildbits.d` changes are uncommitted.
+4. ~~A Jr2 hardware run~~ **everything works on the Jr2 (user, 2026-09-30; tested by someone else)**, at
+   12 MHz, with the production build.
+5. ~~The new kernel's FLASHDIS~~ **works on hardware (user, 2026-09-30)**: 1,792K of RAM. The nitros9
+   `krnp2.asm` and `defs/wildbits.d` changes are still uncommitted.
 6. Carried from before, low priority: the line-engine holes and `tline` (FPGA developer),
    `SS.MsDelta` storage in vtio, the coprocessor divide's read-after-write timing on hardware, the
    encoder's rate on the mouse against MAME.

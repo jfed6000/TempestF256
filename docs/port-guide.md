@@ -92,6 +92,20 @@ Conventions worth repeating:
 
 ## 3. Level 2 is the environment, and its limit is logical space
 
+**The machine, as of 2026-09-30** (re-check on every new core; section 13, "Which source to believe"):
+
+| | Now | Before |
+|---|---|---|
+| CPU | 6809 at **12 MHz**, K2 and Jr2 (the K2 since 2026-09-27) | 8 MHz. Every µs figure in this guide was measured at 8 MHz unless it says otherwise; CPU-bound costs scale by 2/3, driver-call costs roughly so, and anything tied to the frame (the 60 Hz tick, a DMA fill's vblank wait) not at all |
+| RAM | **1,792K** (224 blocks of 8K): `$00-$3F`, `$40-$9F`, `$A0-$BF`, `$D0-$EF` | 1 MB (128 blocks): `$40-$9F` was the flash window and expansion space |
+| How | The kernel (`krnp2`, 2026-09-27) sets `FLASHDIS` when `MMU_IO_CTRL` bit 7 says the core has it, and maps `$40-$9F` as RAM; the block map covers all 256 blocks on both machines. **Confirmed working on hardware** (2026-09-30) | An older core, or an older kernel, still gives 1 MB — so treat an `F$AllRAM` failure as a real outcome, and don't design an asset set that needs the 1,792K without saying so |
+
+What the extra speed and memory do **not** change: the eight-block logical space (below) is the same, so
+the module budget, the window rule and `E$MemFul` are exactly as they were; more RAM means more assets
+and bigger buffers outside the 64K, not a bigger program. And a faster CPU does not make a game faster by
+itself — Tempest gained nothing from 8 → 12 MHz until a frame gate that quantised to ticks was fixed
+(section 12.2).
+
 - **Level 2 only.** Level 1 has no place in this; don't design for it.
 - A process owns the full 64K except `$FD00-$FFFF`, in **eight 8K blocks**. Everything competes for those
   eight: the module, the data area, and every mapped window.
@@ -108,7 +122,7 @@ Conventions worth repeating:
   used two 2-block windows during start-up; that fits a 3-block module and not a 4-block one, so the
   failure appeared only when the module grew past 24,576 bytes — far below its real limit and nowhere
   near the code that caused it.
-- **Assets live outside the 64K.** `F$AllRAM` blocks anywhere in the ~2 MB; map one in with `F$MapBlk`,
+- **Assets live outside the 64K.** `F$AllRAM` blocks anywhere in the 1,792K (1 MB on an older core); map one in with `F$MapBlk`,
   read the file into it, `F$ClrBlk`. (**Known wart:** `F$AllRAM`/`F$DelRAM` from an application is
   technically a system call. The answer now exists in grfdrv256 — **`SS.GfxAlloc` `$D4` / `SS.GfxFree`
   `$D5`**, N consecutive blocks the program owns, confirmed on the K2 2026-09-20 — but neither Joust nor
@@ -292,7 +306,7 @@ Patterns that fell out of it:
   There is no driver-side copy, so a terminal switch restores the screen out of your own memory. Joust marks
   the lowest and highest record each frame writes and sends that one range — measured on hardware at
   **2.5 records changed a frame over a span of 6.4, sent as 9.0**, which costs 547 µs against 1,074 µs for an
-  unconditional 128-record send. A call costs ~480 µs before it moves a byte and ~7.4 µs a record, so **one
+  unconditional 128-record send. A call costs ~480 µs before it moves a byte and ~7.4 µs a record (8 MHz), so **one
   call over a range beats one call per group of changes** until the groups are very far apart.
 - **Registration is required and there is no other way in.** A call that pushed records from a caller's
   buffer would be a second writer the driver cannot reproduce on a switch, which is why it was removed. One
@@ -365,7 +379,7 @@ failure latches its CPU fallback for the run — and is safe only because it wai
 never arms a second while one is pending.
 
 **Tempest is the worked example: `SS.BmClear` clears the hidden 76,800-byte line bitmap once per game
-frame**, 16-bit, halting the CPU about 384 µs. What it cost to learn:
+frame**, 16-bit, halting the CPU about 384 µs (the DMA's time, not the CPU's: unchanged at 12 MHz). What it cost to learn:
 
 - **Arm it, don't wait for it.** The fill starts at once only if armed before line 42; armed later, it
   waits for the next line 0. Wait mode 7 (poll until done) called mid-frame therefore slept most of a
@@ -390,7 +404,7 @@ frames, radar, starfields and score frames that would otherwise be hand-plotted 
 
 **Applications do not drive the registers below.** `SS.BmLine` (`$E7`) takes a batch of 8-byte records
 (X0, X1, Y0, Y1, colour; 16-bit X) — up to 255 a call, R$U the count in and the count drawn out — and does
-the GO/COMPLETE handshake, the range check and the FIFO pacing in the driver. A call costs ~450 µs before
+the GO/COMPLETE handshake, the range check and the FIFO pacing in the driver. A call costs ~450 µs (8 MHz) before
 its first record, so **records per call is the number to maximise**: Tempest sends 1.2-2 calls a game frame
 of ~110-160 records each. The call returns short when the FIFO nears full; count short returns in the
 diagnostics (Tempest's stayed at 0 over thousands of calls, which is what said a bigger FIFO would buy
@@ -708,7 +722,7 @@ sequencer stays byte-exact against the ROM, and only the translation is new.
   plugged in, the first reading is empty, and an absent pad or an NES pad read in SNES mode shows buttons
   held. Tempest skips the first reading and takes the pad only after it has once read all-zero, at rest.
   *(Tempest's pad support is untested on a real pad: the bit order is read from the RTL.)*
-- **A call costs ~400-500 µs, so read a device only once it has been used.** Tempest looks at the stick
+- **A call costs ~400-500 µs (8 MHz), so read a device only once it has been used.** Tempest looks at the stick
   every 30 passes until it has shown a direction or a button, then every pass; that halved its GetStat
   calls and the time went back to the drawing.
 - **Modifier/arrow keys and ordinary keys held:** `SS.LiveKeys $C6` returns the driver's live `D.KySns`
@@ -848,7 +862,7 @@ A full pool handing back a scratch record is a real edge case — decide what it
 ### 12.1 How much of the display to send each frame
 
 A driver call costs about **400 µs before it moves a byte**, and about **8.4 µs a sprite record** after that
-(measured, `docs/driver-performance.md`).  Put those two numbers together and one call is worth about **48
+(measured at 8 MHz, `docs/driver-performance.md` in the Joust repo; re-measure at 12 MHz).  Put those two numbers together and one call is worth about **48
 records**: it is cheaper to send 48 records you did not need to than to make a second call that skips them.
 That ratio, not the byte count, is what a commit should be designed around, and it is worth re-measuring on
 any machine before trusting it.
@@ -943,18 +957,19 @@ what they bought Tempest:
 **Testing**
 
 - **The hardware is the test.** The Wildbits MAME (`wbjr2`) emulates less than the machine, and what it
-  covers changes with its build. The build of **2026-09-30 (commit `34a1205`, the v8_rc20 baseline)**
-  renders the **bitmap, tile map and sprite layers** with their CLUTs, **draws with the line engine**
+  covers changes with its build. The build of **2026-09-30 (commit `8779b61`, the v8_rc20 baseline)**
+  renders the **bitmap, tile map and sprite layers** with their CLUTs (tile-map attributes as section 6
+  has them, from `028632e`), the MemText text engine, **draws with the line engine**
   (Tempest's rating-screen wells appear), returns the live raster row at `$FFDA/$FFDB`, and has the
   sound chips — the SIDs at `$FF98/$FF99`, the OPL3, the PSGs, the VS1053 — though no port's sound has
   been heard through it yet. Its **DMA is instant**: the whole fill runs inside the register write and
   never halts the CPU, so no DMA timing, wait-mode or arming-line result means anything there (the
-  2026-09-21 build also filled 16-bit clears with the wrong value; not re-checked). **Its CLUT byte order
-  is wrong from `34a1205` on**: it reads entries as R, G, B, A, but the hardware is **B, G, R, A** (the
-  RTL's 8-bit-write, 32-bit-read CLUT RAM puts byte 0 in bits 7:0, which `TinyVickyCoreModule.v` wires to
-  blue; and every photograph of both games agrees), so **red and blue are exchanged in its pictures**.
-  Older builds: `6ed0ed0` (2026-09-21) had no line engine and no sound; the Sep 6 one, and
-  `~/projects/grok/mame`, draw text only. It is good for proving a *program* works — crashes, hangs,
+  2026-09-21 build also filled 16-bit clears with the wrong value; not re-checked). **Check a new build's
+  colours against a photograph**: `34a1205` read CLUT entries as R, G, B, A and swapped red and blue
+  everywhere; `0f1d5dd` put it back to the hardware's **B, G, R, A** (the RTL's 8-bit-write, 32-bit-read
+  CLUT RAM puts byte 0 in bits 7:0, which `TinyVickyCoreModule.v` wires to blue). Older builds:
+  `6ed0ed0` (2026-09-21) had no line engine and no sound; the Sep 6 one, and `~/projects/grok/mame`,
+  draw text only. It is good for proving a *program* works — crashes, hangs,
   OS-9 error codes, what is on screen — for a static utility harness that prints numbers, and for
   **counting calls** (call counts are logic, not timing). **Its timing is no evidence.** **Do not modify
   MAME.**
@@ -982,7 +997,7 @@ what they bought Tempest:
       make SOURCES=src/mame/wildbits/wildbits_jr2.cpp NOWERROR=1 REGENIE=1 -j$(nproc)
 
   `NOWERROR=1` because MAME builds with warnings as errors and an upstream commit can leave a warning in
-  (`34a1205` did: an unused function); `REGENIE=1` because the option only takes effect when the
+  (`34a1205` did: an unused function, still there at `8779b61`); `REGENIE=1` because the option only takes effect when the
   generated makefiles are regenerated. Keep the previous binary (`cp -p mame mame-<commit>`) until the
   new one has run a program, and check `make`'s exit status, not the tail of its log. Its source is also where
   MAME's drivers for arcade hardware can be read (for Tempest: `src/mame/atari/tempest.cpp`,

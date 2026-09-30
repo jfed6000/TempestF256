@@ -24,7 +24,7 @@ on has every step, each marked confirmed or untested):
     krnp2.asm (FLASHDIS: blocks $40-$9F as RAM on cores that have it; both machines), with
     FLASHDIS's defs copied into defs/wildbits.d from ~/projects/wild/Sept2026/nitros9; Joust, JOUST/*
     and tempest restored from backups and compared. The nitros9 changes are UNCOMMITTED (user's
-    choice). FLASHDIS untested on hardware. docs/status.md "The disk images rebuilt".
+    choice). FLASHDIS works on hardware (user, 2026-09-30). docs/status.md "The disk images rebuilt".
   - main (ff90-sound merged in 2026-09-27; ff90-sound kept). 640x240 HIRES4 planes. The K2 now
     runs the 6809 at 12 MHz: 26.9 game frames a second (2,524 in 94 s, 3 dropped; the arcade's
     27.1), up from 19.8 at 8 MHz. The ff90-sound merge brought: the SIDs through the new core's
@@ -59,7 +59,9 @@ on has every step, each marked confirmed or untested):
     the new core's line FIFO): pushed to jfed6000/nitros9 2026-09-24. Installed on both disk images.
   - The 320 build: main before the merge, dacdbbb (15.4 game frames a second).
 
-NEXT SESSION: my call. Open items (hardware confirmation only): docs/status.md "Open items".
+NEXT SESSION: my call. Open items (hardware confirmation only): docs/status.md "Open items". Since
+2026-09-30 (user): the Jr2 runs everything (tested by someone else), both machines are 12 MHz, and
+FLASHDIS gives 1,792K on hardware.
 
 GROUND RULES (from Joust, all still in force): Level 2 only. Position-independent code, OS-9 program
 modules, data through DP/U; a "make pic" check like Joust's tools/piccheck.py. No direct MMU access from
