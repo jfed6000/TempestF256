@@ -11,4 +11,9 @@ is kept, unchanged, in `tempest_orig/` as the port's reference.
 - `tools/`: host-side models and tests
 - `docs/`: the port's plan, survey and status
 
-The 640x240 build is on `main` (merged from `hires640`).
+The 640x240 build is on `main` (merged from `hires640`). It is feature-complete and plays at about 27
+game frames a second on a 12 MHz K2 (the arcade's 27.1).
+
+Build: `cd src; make` for the production module; `make EXTRA="-DDIAG"` (after `touch tempest.asm`)
+for a diagnostic one whose sign-off adds the run's numbers. `make install DSK=path/to/image.dsk`
+copies it to `CMDS` on a disk image.

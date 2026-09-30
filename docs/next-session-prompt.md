@@ -16,8 +16,15 @@ READ FIRST:
   - docs/port-guide.md (generic platform guide) and, from ~/projects/wild/joust/docs, only as needed:
     grfdrv256-api.md, bitmap-api.md, driver-performance.md.
 
-WHERE THINGS STAND (2026-09-27, end of session; docs/status.md from "Hardware: the collapse and BmWait build works"
+WHERE THINGS STAND (2026-09-27, end of day; THE PORT IS FEATURE-COMPLETE; docs/status.md from "Hardware: the collapse and BmWait build works"
 on has every step, each marked confirmed or untested):
+  - Latest (main 8501b96, pushed): the production build, 39,541 of 40,192 bytes, the sign-off's
+    numbers behind DIAG (make EXTRA="-DDIAG"). The slowdown fix is CONFIRMED on the K2 ("No
+    slowdowns"). Both disk images (K2, Jr2) were then rebuilt from the recipe for the user's new
+    krnp2.asm (FLASHDIS: blocks $40-$9F as RAM on cores that have it; both machines), with
+    FLASHDIS's defs copied into defs/wildbits.d from ~/projects/wild/Sept2026/nitros9; Joust, JOUST/*
+    and tempest restored from backups and compared. The nitros9 changes are UNCOMMITTED (user's
+    choice). FLASHDIS untested on hardware. docs/status.md "The disk images rebuilt".
   - main (ff90-sound merged in 2026-09-27; ff90-sound kept). 640x240 HIRES4 planes. The K2 now
     runs the 6809 at 12 MHz: 26.9 game frames a second (2,524 in 94 s, 3 dropped; the arcade's
     27.1), up from 19.8 at 8 MHz. The ff90-sound merge brought: the SIDs through the new core's
@@ -35,7 +42,7 @@ on has every step, each marked confirmed or untested):
   - The slowdown within a run (game 2 or 4: 11.6 frames a second, restart fixed it) was FOUND on the
     host and fixed in 57fd80d: gfx.a bcgo latched NODMA on SS.BmClear's E$DevBsy (a fill still
     outstanding after two logic passes in one frame, a dropped drawing between, allowed by the FRTIMR
-    carry), so the CPU cleared 80K every frame. Busy is now success. Host replay 8.0 -> 23.0; NOT YET
+    carry), so the CPU cleared 80K every frame. Busy is now success. Host replay 8.0 -> 23.0;
     CONFIRMED ON THE K2 (user: "No slowdowns"). docs/status.md "The slowdown found".
   - Then the port was called feature-complete and the sign-off's numbers went behind a build flag,
     DIAG (make EXTRA="-DDIAG"): the plain (production) module is 39,541 of 40,192 bytes and signs
@@ -52,7 +59,7 @@ on has every step, each marked confirmed or untested):
     the new core's line FIFO): pushed to jfed6000/nitros9 2026-09-24. Installed on both disk images.
   - The 320 build: main before the merge, dacdbbb (15.4 game frames a second).
 
-NEXT SESSION: my call. Open items: docs/status.md "Open items".
+NEXT SESSION: my call. Open items (hardware confirmation only): docs/status.md "Open items".
 
 GROUND RULES (from Joust, all still in force): Level 2 only. Position-independent code, OS-9 program
 modules, data through DP/U; a "make pic" check like Joust's tools/piccheck.py. No direct MMU access from
@@ -69,8 +76,8 @@ TOOLING (all in the Joust tree, shared):
   - NitrOS-9 and the drivers: export NITROS9DIR=/home/magnus/projects/wild/joust/nitros9_complete/nitros9
     on EVERY command; build in $NITROS9DIR/recipes/wildbits/l2 with PLATFORM=k2 or jr2. Driver changes
     go to branch wb/multiterm and push to jfed6000/nitros9. NEVER "git add -A" there.
-  - The Wildbits MAME: from $NITROS9DIR as
-        mame/mame wbjr2 -window -skip_gameinfo -bios turbo -hard recipes/wildbits/l2/l2_wildbitsjr2.dsk
+  - The Wildbits MAME: ~/projects/wild/mame (its own clone since 2026-09-30; $NITROS9DIR/mame is a symlink to it) as
+        ~/projects/wild/mame/mame wbjr2 -window -skip_gameinfo -bios turbo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
     It proves a program's logic, never its timing; -autoboot_command needs the two-character escape \n.
     Its source tree also holds MAME's Tempest, AVG and Math Box drivers (src/mame/atari/tempest.cpp,
     src/devices/video/avgdvg.cpp, src/mame/atari/mathbox.cpp): read them, don't touch them.
@@ -79,6 +86,9 @@ TOOLING (all in the Joust tree, shared):
         os9 copy -o=0 path/to/prog l2_wildbitsk2.dsk,CMDS/prog
         os9 attr -q -pe -npw -pr -e -w -r l2_wildbitsk2.dsk,CMDS/prog
     Then copy it back out and cmp it, clearing the scratch file first.
+    A boot-module change (krnp2, vtio, init) needs the image target: back up both images, empty
+    .mods before each PLATFORM's make (it is shared), then copy back what the recipe does not
+    install (joust, joustadm, jst*, jstview, JOUST/*, tempest) and compare every file.
   - lwasm with nosymbolcase: scan case-folded for clashes. A local label's (name@) scope ends at a BLANK
     line. A new source file must join the makefile's SOURCES or make silently checks old listings.
   - F$Sleep with X=1 only yields; X=2 waits one 60 Hz tick.
@@ -86,7 +96,8 @@ TOOLING (all in the Joust tree, shared):
     -n 30 (~25 min), --src --states captures/states_play.bin captures/states_attract.bin (~3 min).
     The captures are regenerable (command in docs/status.md, "D6 hand work", 4); run the fuzz in the
     background and never "pkill -f" a pattern your own command line contains.
-  - The module: cd src; make (budget and pic); make EXTRA="-DRECUS=170" tries a budget. The host
+  - The module: cd src; make (budget and pic: the production build); make EXTRA="-DDIAG" the
+    diagnostic one (touch tempest.asm first). The host
     run: python3 tools/osrun.py --seconds 60 [--png DIR --every N] [--passes] (~2 min a simulated
     minute). avgtest.py --batch 0 tests AvgFlush's changing batch sizes. The Wildbits MAME types and
     snaps from a Lua -autoboot_script (it replaces -autoboot_command; keep the notifier's

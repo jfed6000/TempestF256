@@ -1963,18 +1963,42 @@ same row (in `DIAG` builds the first numbers line did). Now CR LF: **module 39,5
 free); MAME shows "Tempest over.", the closer, the prompt. A `DIAG` build now differs from 57fd80d by
 that byte.
 
+## The disk images rebuilt for the new kernel (2026-09-27) — booted in MAME; FLASHDIS untested on hardware
+
+The user put a new `level2/modules/kernel/krnp2.asm` in the Joust tree's nitros9 (from
+`~/projects/wild/Sept2026/nitros9`): the block map grows to 256 entries on **both** machines now (the
+`IFNE k2` guard is gone), and when `MMU_IO_CTRL` bit 7 (`FLASHDIS.OK`) reads 1 the kernel sets bit 2
+(`FLASHDIS`, read-modify-write) and blocks `$40-$9F` become 768K more RAM; an older core keeps them
+NotRAM. It would not assemble: the Joust tree's `defs/wildbits.d` lacked `FLASHDIS`, so its two
+equates and the `$FFA1` bit notes were copied from the Sept2026 tree's (bit 2 matches the core,
+`TyVKy2K2x1_MMU_Register.v`). Nothing else stores to `$FFA1` but `krn` (read-modify-write, before
+`krnp2`) and the FEU trampoline (before boot). **Both nitros9 changes are uncommitted** (the user's
+choice).
+
+**The images:** both backed up, then a clean `make PLATFORM=k2` and `make PLATFORM=jr2`, `.mods` emptied
+before each (it is shared; left holding the K2 build). Boot file 30,464 bytes (limit 32,256). The
+format wipes what the recipe does not install, so `joust`, `joustadm`, `jst*`, `jstview`, `JOUST/*`
+and `tempest` were copied back from the backups with their attributes, each read back and compared.
+Every file then compared with its backup: only `OS9Boot`, `wbinfo` (its build date) and `FEU/startup`
+differ. The Wildbits MAME boots the Jr2 image and runs tempest to its sign-off (MAME's `$FFA1` is
+presumably the older core's, so only that path ran there).
+
+**A recipe quirk, left alone:** `wildbits.mak`'s `$(FEU_STARTUP)` rule is FORCEd and appends, so
+`feu.startup` gains a `bootos9 /s0/OS9Boot` line every build (69 now). The first one boots; harmless.
+
 ## Open items
 
-1. The line-engine holes (FPGA developer).
-2. `tline` for stage 1, when the core is fixed: above all the per-record cost.
-3. `SS.MsDelta` storage (5 bytes of vtio statics, 242 → 247 of 256), and its driver code.
-4. The frame rate: settled for now. No split, the SOL clock catching up lost ticks, the well out
-   of the loop: K2 19.8 game frames a second (4,230 in 214 s, 5 dropped). Later levels still slow
-   a little as enemies are added; the ideas not taken: the well's colours through a CLUT instead
-   of a redraw, faster glyphs, tline S.
-5. The coprocessor divide's read-after-write timing, and its remainder, on hardware (D6 pilot,
-   "Unchecked"; `DIVF` reads the remainder). Now also the multiplier's (`avg.a`, approved).
-6. The hardware half: the module itself can now be the first picture (`make install DSK=`, the
-   K2 image) once the core is fixed, photographed against `tools/osrun.py --png` and
-   `avgview.py --port --png`; `avgplay` (captured frames) remains the narrower test.
-7. The encoder's rate and direction on the keys, stick and mouse: by feel, against MAME.
+The port is feature-complete (user, 2026-09-27). What remains is hardware confirmation:
+
+1. **SNES pad 0** (d-pad, B fire, A zap) on a real pad: untested.
+2. **The rating ladder and initials** with left/right reversed back: host trace only.
+3. **The superzapper on stick button 2**: impossible on the current K2 core (VIA0 bits 5-6 tied
+   to 1); the pad's A or the keys zap.
+4. **A Jr2 hardware run**: none recorded. The Jr2 image holds the production build.
+5. **The new kernel's FLASHDIS** (768K more RAM) on either machine: untested; the nitros9
+   `krnp2.asm` and `defs/wildbits.d` changes are uncommitted.
+6. Carried from before, low priority: the line-engine holes and `tline` (FPGA developer),
+   `SS.MsDelta` storage in vtio, the coprocessor divide's read-after-write timing on hardware, the
+   encoder's rate on the mouse against MAME.
+
+Diagnostics: `make EXTRA="-DDIAG"` (touch `tempest.asm` first) restores the sign-off's numbers.
