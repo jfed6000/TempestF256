@@ -1997,7 +1997,17 @@ The port is feature-complete (user, 2026-09-27). What remains is hardware confir
 4. ~~A Jr2 hardware run~~ **everything works on the Jr2 (user, 2026-09-30; tested by someone else)**, at
    12 MHz, with the production build.
 5. ~~The new kernel's FLASHDIS~~ **works on hardware (user, 2026-09-30)**: 1,792K of RAM. The nitros9
-   `krnp2.asm` and `defs/wildbits.d` changes are still uncommitted.
+   `krnp2.asm` and `defs/wildbits.d` changes are still uncommitted. They will not be committed:
+   upstream main now has its own version of both (see item 7).
+7. **NitrOS-9 `wb/multiterm` is moving to upstream main (started 2026-10-08).** Main moved the
+   device pages to the Longview map (VICKY `$C0`->`$FC`, fonts/CLUTs `$C1`->`$FD`, text `$C2`->`$FE`,
+   colour `$C3`->`$FF`, sound `$C4` -> fixed ports `$FF91-$FF99`), and grfdrv256 hardcodes the old
+   ones. The work is a new branch, `wb/multiterm-v2` (from upstream `fb10ce44`), in its own clone,
+   `~/projects/wild/multiterm-pr/nitros9`, with its own session; the plan is
+   `~/projects/wild/multiterm-pr/multiterm-pr-plan.md`. The goal is a PR to nitros9project/nitros9.
+   Until v2 is tested, `joust/nitros9_complete/nitros9` (`wb/multiterm`) stays the Tempest baseline,
+   unchanged. When v2 is tested, Tempest's disk images get rebuilt from it; that needs a
+   new-map core on the K2 and Jr2 (and MAME support for it).
 6. Carried from before, low priority: the line-engine holes and `tline` (FPGA developer),
    `SS.MsDelta` storage in vtio, the coprocessor divide's read-after-write timing on hardware, the
    encoder's rate on the mouse against MAME.

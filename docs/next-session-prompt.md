@@ -76,8 +76,10 @@ thing per hardware run. Docs are the handoff: label a diagnosis untested until h
 
 TOOLING (all in the Joust tree, shared):
   - NitrOS-9 and the drivers: export NITROS9DIR=/home/magnus/projects/wild/joust/nitros9_complete/nitros9
-    on EVERY command; build in $NITROS9DIR/recipes/wildbits/l2 with PLATFORM=k2 or jr2. Driver changes
-    go to branch wb/multiterm and push to jfed6000/nitros9. NEVER "git add -A" there.
+    on EVERY command; build in $NITROS9DIR/recipes/wildbits/l2 with PLATFORM=k2 or jr2. That tree
+    (wb/multiterm, old $C0-$C4 map) is the Tempest baseline: leave it alone. Driver work now happens
+    on wb/multiterm-v2 (upstream main's new memory map) in ~/projects/wild/multiterm-pr/nitros9, in
+    its own session; see docs/status.md open item 7. NEVER "git add -A" in a nitros9 tree.
   - The Wildbits MAME: ~/projects/wild/mame (its own clone since 2026-09-30; $NITROS9DIR/mame is a symlink to it) as
         ~/projects/wild/mame/mame wbjr2 -window -skip_gameinfo -bios turbo -hard $NITROS9DIR/recipes/wildbits/l2/l2_wildbitsjr2.dsk
     It proves a program's logic, never its timing; -autoboot_command needs the two-character escape \n.
